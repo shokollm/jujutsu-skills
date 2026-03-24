@@ -8,6 +8,22 @@ description: Browse tradeable Polymarket events by game category. Shows active m
 
 Browse tradeable Polymarket prediction market events by game category.
 
+## Installation
+
+**For Hermes Agent users:**
+```bash
+hermes skills install https://git.fbrns.co/shoko/jujutsu-skills#polymarket-browse
+```
+
+**Manual installation:**
+```bash
+# Clone the repo
+git clone https://git.fbrns.co/shoko/jujutsu-skills.git ~/jujutsu-skills
+
+# Copy skill to your Hermes skills folder
+cp -r ~/jujutsu-skills/skills/polymarket-browse ~/.hermes/skills/
+```
+
 ## Usage
 
 ```
