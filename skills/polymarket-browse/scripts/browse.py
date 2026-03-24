@@ -14,9 +14,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # ============================================================
 
-FETCH_PAGES = 4
-PAGE_SIZE = 5
-DISPLAY_MAX = 10
+PAGE_SIZE = 50
 MAX_RETRIES = 5
 INITIAL_RETRY_DELAY = 2  # exponential backoff starts at 2s
 
@@ -66,20 +64,29 @@ def fetch_page(q, page=1, max_retries=MAX_RETRIES, initial_delay=INITIAL_RETRY_D
             return None
     return None
 
-def fetch_all_pages(q, num_pages=FETCH_PAGES):
+def fetch_all_pages(q, max_pages=100):
+    """
+    Fetch ALL pages until pagination ends.
+    max_pages is a safety cap to prevent infinite loops.
+    """
     all_events = []
     total_raw = 0
-    for page in range(1, num_pages + 1):
-        time.sleep(1)
+    for page in range(1, max_pages + 1):
+        time.sleep(0.2)  # small delay between pages (API rate limit is generous)
         data = fetch_page(q, page)
         if data is None:
             break
         events = data.get("events", [])
-        total_raw = data.get("pagination", {}).get("totalResults", "?")
+        total_raw = data.get("pagination", {}).get("totalResults", 0)
         all_events.extend(events)
-        if len(events) < PAGE_SIZE:
+        # Stop when we get 0 events (no more pages),
+        # OR when we've fetched >= total results
+        if len(events) == 0:
             break
-    return {"events": all_events, "total_raw": total_raw}
+        if len(all_events) >= total_raw:
+            break
+    partial = (total_raw > 0 and len(all_events) < total_raw)
+    return {"events": all_events, "total_raw": total_raw, "partial": partial}
 
 # ============================================================
 # FILTERS
@@ -87,6 +94,16 @@ def fetch_all_pages(q, num_pages=FETCH_PAGES):
 
 def is_match_market(e):
     return (e.get("seriesSlug") and e.get("gameId")) or " vs " in e.get("title", "")
+
+def get_event_url(e):
+    """Return the correct Polymarket URL for an event.
+    Match markets use /market/, non-match events use /event/.
+    """
+    slug = e.get("slug", "")
+    if is_match_market(e):
+        return f"https://polymarket.com/market/{slug}"
+    else:
+        return f"https://polymarket.com/event/{slug}"
 
 def get_ml_market(e):
     for m in e.get("markets", []):
@@ -149,6 +166,20 @@ def is_tradeable_event(e):
             now = datetime.now(timezone.utc)
             if end_dt < now:
                 return False
+        except:
+            pass
+    
+    # Filter: match has already started (startTime is in the past)
+    start_str = e.get("startTime") or e.get("startDate", "")
+    if start_str:
+        try:
+            start_dt = datetime.fromisoformat(start_str.replace('Z', '+00:00'))
+            now = datetime.now(timezone.utc)
+            if start_dt < now:
+                # Check if it's recently started (within 4h) — consider those "live" still
+                hours_ago = (now - start_dt).total_seconds() / 3600
+                if hours_ago > 4:
+                    return False
         except:
             pass
     
@@ -273,8 +304,22 @@ def get_match_time_str(e):
     except:
         return ""
 
-def filter_events(events):
-    return [e for e in events if is_match_market(e) and is_tradeable_event(e)]
+def filter_events(events, tradeable_only=True):
+    """
+    Classify events into match_markets and non_match_markets.
+    If tradeable_only=True, also filter out non-tradeable events.
+    """
+    match_events = []
+    non_match_events = []
+    
+    for e in events:
+        if is_match_market(e):
+            if not tradeable_only or is_tradeable_event(e):
+                match_events.append(e)
+        else:
+            non_match_events.append(e)
+    
+    return match_events, non_match_events
 
 def sort_events(events):
     return sorted(events, key=get_ml_volume, reverse=True)
@@ -283,16 +328,20 @@ def sort_events(events):
 # BROWSE
 # ============================================================
 
-def browse_events(q, display_max=DISPLAY_MAX):
-    result = fetch_all_pages(q, FETCH_PAGES)
+def browse_events(q, matches_max=10, non_matches_max=10, tradeable_only=True):
+    result = fetch_all_pages(q)
     events = result["events"]
-    filtered = filter_events(events)
-    sorted_events = sort_events(filtered)
+    match_events, non_match_events = filter_events(events, tradeable_only)
+    sorted_match = sort_events(match_events)
     return {
         "query": q,
         "total_raw": result["total_raw"],
-        "total_filtered": len(filtered),
-        "events": sorted_events[:display_max],
+        "total_fetched": len(events),
+        "total_match": len(match_events),
+        "total_non_match": len(non_match_events),
+        "match_events": sorted_match[:matches_max],
+        "non_match_events": non_match_events[:non_matches_max],
+        "partial": result.get("partial", False),
     }
 
 # ============================================================
@@ -312,7 +361,7 @@ def format_event(e):
         "title": e.get("title", ""),
         "time_status": time_status,
         "time_urgency": urgency,
-        "url": f"https://polymarket.com/market/{e.get('slug')}",
+        "url": get_event_url(e),
         "livestream": e.get("resolutionSource"),
         "outcomes": outcomes,
         "prices": prices,
@@ -335,7 +384,7 @@ def format_detail_event(e):
     return {
         "title": e.get("title", ""),
         "time_status": time_status,
-        "url": f"https://polymarket.com/market/{e.get('slug')}",
+        "url": get_event_url(e),
         "livestream": e.get("resolutionSource"),
         "outcomes": json.loads(ml.get("outcomes", "[]")) if ml else [],
         "prices": json.loads(ml.get("outcomePrices", "[]")) if ml else [],
@@ -389,8 +438,8 @@ def get_start_time_wib(e):
         else:
             hours_until = delta.total_seconds() / 3600
             if hours_until < 1:
-                mins = int(delta.total_seconds() / 60)
-                rel_str = f"In {mins}m"
+                mins_until = int(delta.total_seconds() / 60)
+                rel_str = f"In {mins_until}m"
             elif hours_until < 24:
                 rel_str = f"In {int(hours_until)}h"
             else:
@@ -416,62 +465,82 @@ def get_tournament(title):
             return " - ".join(parts[1:]).strip()
     return ""
 
-def print_browse(events, category, total_raw, total_filtered):
+def print_browse(match_events, non_match_events, category, total_raw, total_fetched, total_match, total_non_match, raw_mode=False, partial=False, non_matches_max=5, matches_only=False, non_matches_only=False):
     from datetime import datetime, timezone, timedelta
     now_utc = datetime.now(timezone.utc)
     utc7 = timezone(timedelta(hours=7))
     now_utc7 = now_utc.astimezone(utc7)
     header_date = get_header_date()
     
-    print(f"\n{'='*60}")
-    print(f"=== {category.upper()} ===")
-    print(f"{'='*60}")
-    print(f"Query: '{GAME_CATEGORIES[category]}' | Total API: {total_raw} | Tradeable: {total_filtered}")
+    print(f"\n=== {category.upper()}{' [RAW]' if raw_mode else ''} ===")
     print(f"Current time (WIB): {now_utc7.strftime('%H:%M WIB')} | {header_date}")
     
-    if not events:
-        print("  No tradeable events found.")
-        return
+    if raw_mode:
+        print(f"Fetched: {total_fetched} / Total API: {total_raw} | Match: {total_match} | Non-match: {total_non_match}")
+    if partial:
+        print(f"WARNING: Partial fetch (API error or timeout) — data may be incomplete")
     
-    for i, e in enumerate(events, 1):
-        f = format_event(e)
-        ml = get_ml_market(e)
-        outcomes = json.loads(ml.get("outcomes", "[]")) if ml else []
-        prices = json.loads(ml.get("outcomePrices", "[]")) if ml else []
-        vol = f["volume"]
-        title = f["title"]
-        url = f["url"]
-        start_time_wib, rel_time = get_start_time_wib(e)
-        
-        team_a = outcomes[0] if len(outcomes) > 0 else "?"
-        team_b = outcomes[1] if len(outcomes) > 1 else "?"
-        odds_a = format_odds(float(prices[0])) if len(prices) > 0 else "?"
-        odds_b = format_odds(float(prices[1])) if len(prices) > 1 else "?"
-        
-        # Extract title without tournament for line 1
-        # Title format: "Category: TeamA vs TeamB (BO/X) - Tournament"
-        # We want: "Category: TeamA vs TeamB (BO/X)"
-        if " - " in title:
-            title_clean = title.split(" - ")[0].strip()
+    # --- MATCH MARKETS ---
+    if not matches_only and not non_matches_only:
+        # Default: show both
+        show_matches = True
+        show_non_matches = True
+    elif matches_only:
+        show_matches = True
+        show_non_matches = False
+    else:
+        show_matches = False
+        show_non_matches = True
+    
+    if show_matches:
+        print(f"\nMATCH MARKETS")
+        if not match_events:
+            print("  No match markets found.")
         else:
-            title_clean = title
+            for i, e in enumerate(match_events, 1):
+                f = format_event(e)
+                ml = get_ml_market(e)
+                outcomes = json.loads(ml.get("outcomes", "[]")) if ml else []
+                prices = json.loads(ml.get("outcomePrices", "[]")) if ml else []
+                vol = f["volume"]
+                title = f["title"]
+                url = f["url"]
+                start_time_wib, rel_time = get_start_time_wib(e)
+                
+                team_a = outcomes[0] if len(outcomes) > 0 else "?"
+                team_b = outcomes[1] if len(outcomes) > 1 else "?"
+                odds_a = format_odds(float(prices[0])) if len(prices) > 0 else "?"
+                odds_b = format_odds(float(prices[1])) if len(prices) > 1 else "?"
+                
+                if " - " in title:
+                    title_clean = title.split(" - ")[0].strip()
+                else:
+                    title_clean = title
+                
+                tournament = get_tournament(title)
+                
+                print(f"\n  {i}. [{title_clean}]({url})")
+                print(f"     {start_time_wib} | {rel_time}")
+                print(f"  Vol: ${vol:,.0f}")
+                if tournament:
+                    print(f"  Tournament: {tournament}")
+                print(f"  Odds: {team_a} {odds_a} | {odds_b} {team_b}")
+    
+    # --- NON-MATCH MARKETS ---
+    if show_non_matches and non_match_events:
+        print(f"\nNON-MATCH MARKETS")
         
-        tournament = get_tournament(title)
-        
-        # New format:
-        # 1. [Title](url)  <- title without tournament
-        # 2. Date, Time WIB | Relative
-        # (empty)
-        # Vol: $XXX
-        # Tournament: XXXXX
-        # Odds: TeamA Xc | Xc TeamB
-        print(f"\n  {i}. [{title_clean}]({url})")
-        print(f"     {start_time_wib} | {rel_time}")
-        print(f"")
-        print(f"  Vol: ${vol:,.0f}")
-        if tournament:
-            print(f"  Tournament: {tournament}")
-        print(f"  Odds: {team_a} {odds_a} | {odds_b} {team_b}")
+        for i, e in enumerate(non_match_events[:non_matches_max], 1):
+            title = e.get("title", "?")
+            url = get_event_url(e)
+            start_time_wib, rel_time = get_start_time_wib(e)
+            
+            total_vol = sum(float(m.get("volume", 0)) for m in e.get("markets", []))
+            market_count = len(e.get("markets", []))
+            
+            print(f"\n  {i}. [{title}]({url})")
+            print(f"     {start_time_wib} | {rel_time}")
+            print(f"     Markets: {market_count} | Total Vol: ${total_vol:,.0f}")
 
 def print_detail(e, detail):
     from datetime import datetime, timezone, timedelta
@@ -479,9 +548,7 @@ def print_detail(e, detail):
     utc7 = timezone(timedelta(hours=7))
     now_utc7 = now_utc.astimezone(utc7)
     
-    print(f"\n{'='*60}")
-    print(f"=== DETAIL: {detail['title'][:60]} ===")
-    print(f"{'='*60}")
+    print(f"\n{detail['title']}")
     print(f"URL: {detail['url']}")
     print(f"Livestream: {detail['livestream']}")
     
@@ -500,6 +567,143 @@ def print_detail(e, detail):
         print(f"    URL: {m['url']}")
 
 # ============================================================
+# TELEGRAM
+# ============================================================
+
+def send_to_telegram(match_events, non_match_events, category, matches_only=False, non_matches_only=False):
+    """Send browse results to Telegram. Reads BOT_TOKEN and CHAT_ID from environment."""
+    import os
+    bot_token = os.environ.get("BOT_TOKEN")
+    chat_id = os.environ.get("CHAT_ID")
+    if not bot_token or not chat_id:
+        print("WARNING: BOT_TOKEN or CHAT_ID not set in environment. Skipping Telegram send.")
+        return
+    
+    from datetime import datetime, timezone, timedelta
+    now_utc = datetime.now(timezone.utc)
+    utc7 = timezone(timedelta(hours=7))
+    now_utc7 = now_utc.astimezone(utc7)
+    header_date = now_utc7.strftime("%b %d, %Y")
+    
+    # Determine sections to show
+    show_matches = (not matches_only and not non_matches_only) or matches_only
+    show_non_matches = (not matches_only and not non_matches_only) or non_matches_only
+    
+    def send(text):
+        result = subprocess.run(
+            ["curl", "-s", f"https://api.telegram.org/bot{bot_token}/sendMessage",
+             "-d", f"chat_id={chat_id}",
+             "-d", f"text={text}",
+             "-d", "parse_mode=HTML",
+             "-d", "disable_web_page_preview=true"],
+            capture_output=True
+        )
+        resp = json.loads(result.stdout.decode())
+        if resp.get("ok"):
+            print(f"  Sent msg {resp['result']['message_id']}")
+        else:
+            print(f"  Error: {resp.get('description')}")
+    
+    # Build sections
+    lines = [f"<b>{category.upper()}</b> | {header_date}"]
+    lines.append("")
+    
+    if show_matches:
+        lines.append("MATCH MARKETS")
+        lines.append("")
+        if not match_events:
+            lines.append("  No match markets found.")
+        else:
+            for i, e in enumerate(match_events, 1):
+                ml = get_ml_market(e)
+                outcomes = json.loads(ml.get("outcomes", "[]")) if ml else []
+                prices = json.loads(ml.get("outcomePrices", "[]")) if ml else []
+                vol = get_ml_volume(e)
+                title = e.get("title", "?")
+                url = get_event_url(e)
+                start_time_wib, rel_time = get_start_time_wib(e)
+                team_a = outcomes[0] if len(outcomes) > 0 else "?"
+                team_b = outcomes[1] if len(outcomes) > 1 else "?"
+                odds_a = format_odds(float(prices[0])) if len(prices) > 0 else "?"
+                odds_b = format_odds(float(prices[1])) if len(prices) > 1 else "?"
+                tournament = get_tournament(title)
+                title_clean = title.split(" - ")[0].strip() if " - " in title else title
+                lines.append(f"<b>{i}.</b> <a href=\"{url}\">{title_clean}</a>")
+                lines.append(f"   {start_time_wib} | {rel_time}")
+                lines.append(f"   Vol: ${vol:,.0f}")
+                if tournament:
+                    lines.append(f"   Tournament: {tournament}")
+                lines.append(f"   Odds: {team_a} {odds_a} | {odds_b} {team_b}")
+                lines.append("")
+        lines.append("")
+    
+    if show_non_matches:
+        lines.append("NON-MATCH MARKETS")
+        lines.append("")
+        if not non_match_events:
+            lines.append("  No non-match markets found.")
+        else:
+            for i, e in enumerate(non_match_events, 1):
+                title = e.get("title", "?")
+                url = get_event_url(e)
+                start_time_wib, rel_time = get_start_time_wib(e)
+                total_vol = sum(float(m.get("volume", 0)) for m in e.get("markets", []))
+                market_count = len(e.get("markets", []))
+                lines.append(f"<b>{i}.</b> <a href=\"{url}\">{title}</a>")
+                lines.append(f"   {start_time_wib} | {rel_time}")
+                lines.append(f"   Markets: {market_count} | Total Vol: ${total_vol:,.0f}")
+                lines.append("")
+    
+    # Chunk by 10 items (events), respecting 4096 char Telegram limit
+    text = "\n".join(lines)
+    if len(text) <= 4096:
+        send(text)
+        return
+    
+    # Split into chunks of 10 events
+    all_items = []
+    in_match = True
+    for line in lines:
+        if line == "MATCH MARKETS":
+            in_match = True
+        elif line == "NON-MATCH MARKETS":
+            in_match = False
+        elif line.startswith("<b>") and ". " in line and "</a>" in line:
+            all_items.append((in_match, line))
+    
+    chunk = []
+    chunk_len = 0
+    chunk_num = 1
+    
+    # Header is always first
+    header = f"<b>{category.upper()}</b> | {header_date}\n"
+    if show_matches:
+        header += "\nMATCH MARKETS\n\n"
+    if show_non_matches:
+        header += "\nNON-MATCH MARKETS\n\n"
+    
+    for is_match, item_line in all_items:
+        test_chunk = chunk + [item_line, ""]
+        test_text = header + "\n".join(chunk) + "\n".join(test_chunk)
+        if len(test_text) > 4096 or len(chunk) >= 10:
+            # Send current chunk
+            msg = header + "\n".join(chunk)
+            send(msg)
+            chunk = [item_line, ""]
+            header = f"<b>{category.upper()}</b> (cont.) | {header_date}\n"
+            if show_matches and is_match:
+                header += "\nMATCH MARKETS\n\n"
+            elif show_non_matches and not is_match:
+                header += "\nNON-MATCH MARKETS\n\n"
+        else:
+            chunk.extend([item_line, ""])
+    
+    if chunk:
+        msg = header + "\n".join(chunk)
+        send(msg)
+
+
+# ============================================================
 # MAIN
 # ============================================================
 
@@ -509,11 +713,25 @@ def main():
                        choices=list(GAME_CATEGORIES.keys()),
                        help="Game category to browse")
     parser.add_argument("--limit", type=int, default=5,
-                       help="Max events to show")
+                       help="Max events per section (match + non-match). Default: 5")
+    parser.add_argument("--matches", type=int, default=None,
+                       help="Max match markets to show. Default: --limit")
+    parser.add_argument("--non-matches", type=int, default=None,
+                       help="Max non-match markets to show. Default: --limit")
+    parser.add_argument("--search", type=str, default=None,
+                       help="Free-text team/term search within the selected category. Overrides default query.")
+    parser.add_argument("--matches-only", action="store_true",
+                       help="Show only match markets (suppress non-match section).")
+    parser.add_argument("--non-matches-only", action="store_true",
+                       help="Show only non-match markets (suppress match section).")
     parser.add_argument("--list-categories", action="store_true",
                        help="List available game categories and exit")
     parser.add_argument("--detail", type=int, default=1,
-                       help="Index of event (1-indexed) to show detailed markets for. Default: 1. Set to 0 to disable.")
+                       help="Index of match event (1-indexed) to show detailed markets. Default: 1. Set to 0 to disable.")
+    parser.add_argument("--raw", action="store_true",
+                       help="Show all events without tradeable filter (for debugging).")
+    parser.add_argument("--telegram", action="store_true",
+                       help="Send results to Telegram (BOT_TOKEN and CHAT_ID must be set in environment).")
     args = parser.parse_args()
     
     if args.list_categories:
@@ -522,28 +740,53 @@ def main():
             print(f"  - {name}")
         return
     
-    search_term = GAME_CATEGORIES[args.category]
+    category_term = GAME_CATEGORIES[args.category]
+    search_term = f"{category_term} {args.search}" if args.search else category_term
+    tradeable_only = not args.raw
+    matches_max = args.matches if args.matches is not None else args.limit
+    non_matches_max = args.non_matches if args.non_matches is not None else args.limit
     
-    print(f"\nFetching {args.category} events...")
+    if args.search:
+        print(f"\nFetching {args.category} events matching '{args.search}'...")
+    else:
+        print(f"\nFetching {args.category} events...")
     
-    result = browse_events(search_term, display_max=args.limit)
+    result = browse_events(search_term, matches_max=matches_max, non_matches_max=non_matches_max, tradeable_only=tradeable_only)
     
     print_browse(
-        result["events"], 
+        result["match_events"],
+        result["non_match_events"],
         args.category,
         result["total_raw"],
-        result["total_filtered"]
+        result["total_fetched"],
+        result["total_match"],
+        result["total_non_match"],
+        raw_mode=args.raw,
+        partial=result.get("partial", False),
+        non_matches_max=non_matches_max,
+        matches_only=args.matches_only,
+        non_matches_only=args.non_matches_only
     )
     
     # Print detail for selected event if any
-    if result["events"] and args.detail > 0:
+    if result["match_events"] and args.detail > 0:
         print("\n")
         idx = args.detail - 1
-        if idx < 0 or idx >= len(result["events"]):
+        if idx < 0 or idx >= len(result["match_events"]):
             idx = 0
-        detail_event = result["events"][idx]
+        detail_event = result["match_events"][idx]
         detail = format_detail_event(detail_event)
         print_detail(detail_event, detail)
+    
+    # Send to Telegram if requested
+    if args.telegram:
+        send_to_telegram(
+            result["match_events"],
+            result["non_match_events"],
+            args.category,
+            matches_only=args.matches_only,
+            non_matches_only=args.non_matches_only
+        )
 
 if __name__ == "__main__":
     main()
