@@ -15,6 +15,15 @@ Browse tradeable Polymarket prediction market events by game category.
 hermes skills install https://git.fbrns.co/shoko/jujutsu-skills#polymarket-browse
 ```
 
+**For OpenClaw users:**
+```bash
+# Clone the repo
+git clone https://git.fbrns.co/shoko/jujutsu-skills.git ~/jujutsu-skills
+
+# Copy skill to your OpenClaw skills folder
+cp -r ~/jujutsu-skills/skills/polymarket-browse ~/.openclaw/skills/
+```
+
 **Manual installation:**
 ```bash
 # Clone the repo
