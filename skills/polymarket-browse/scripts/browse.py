@@ -4,11 +4,12 @@ Polymarket Event Browser
 Browse tradeable Polymarket events by game category.
 """
 
-import subprocess
 import json
 import time
 import argparse
 from datetime import datetime, timezone, timedelta
+from urllib.parse import urlencode
+from urllib.request import urlopen, Request
 
 # ============================================================
 # CONFIG
@@ -577,14 +578,13 @@ def print_detail(e, detail):
 # ============================================================
 
 def send_to_telegram(match_events, non_match_events, category, matches_only=False, non_matches_only=False):
-    """Send browse results to Telegram. Reads BOT_TOKEN and CHAT_ID from environment."""
+    """Send browse results to Telegram. Reads TELEGRAM_BOT_TOKEN and CHAT_ID from environment."""
     import os
-    bot_token = os.environ.get("BOT_TOKEN")
+    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("CHAT_ID")
     if not bot_token or not chat_id:
-        print("WARNING: BOT_TOKEN or CHAT_ID not set in environment. Skipping Telegram send.")
-        return
-    
+        raise RuntimeError("TELEGRAM_BOT_TOKEN or CHAT_ID not set in environment")
+
     from datetime import datetime, timezone, timedelta
     now_utc = datetime.now(timezone.utc)
     utc7 = timezone(timedelta(hours=7))
@@ -596,19 +596,19 @@ def send_to_telegram(match_events, non_match_events, category, matches_only=Fals
     show_non_matches = (not matches_only and not non_matches_only) or non_matches_only
     
     def send(text):
-        result = subprocess.run(
-            ["curl", "-s", f"https://api.telegram.org/bot{bot_token}/sendMessage",
-             "-d", f"chat_id={chat_id}",
-             "-d", f"text={text}",
-             "-d", "parse_mode=HTML",
-             "-d", "disable_web_page_preview=true"],
-            capture_output=True
-        )
-        resp = json.loads(result.stdout.decode())
-        if resp.get("ok"):
-            print(f"  Sent msg {resp['result']['message_id']}")
-        else:
-            print(f"  Error: {resp.get('description')}")
+        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        data = urlencode({
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": "true",
+        }).encode("utf-8")
+        req = Request(url, data=data, method="POST")
+        with urlopen(req, timeout=10) as resp:
+            result = json.loads(resp.read())
+            if not result.get("ok"):
+                raise RuntimeError(f"Telegram API error: {result.get('description')}")
+            print(f"  Sent msg {result['result']['message_id']}")
     
     # Build sections
     lines = [f"<b>{category.upper()}</b> | {header_date}"]
