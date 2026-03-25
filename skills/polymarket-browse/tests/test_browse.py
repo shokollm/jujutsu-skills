@@ -8,6 +8,7 @@ import unittest
 from unittest.mock import patch, MagicMock
 import sys
 import os
+from datetime import datetime, timezone, timedelta
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'scripts'))
 from browse import send_telegram_message
@@ -199,6 +200,124 @@ class TestHtmlInjection(unittest.TestCase):
         # BEFORE FIX: raw & appears (vulnerable — test would fail here)
         self.assertIn("&amp;", sent_text,
             "Ampersand not escaped — title may NOT be escaped")
+
+
+class TestTimeFunctions(unittest.TestCase):
+    """Tests for _get_time_data() unified helper.
+
+    These tests verify the helper returns correct time_status, time_urgency,
+    and abs_time for various event scenarios. Callers extract the fields they
+    need from the returned dict.
+    """
+
+    def _make_event(self, start_time):
+        """Helper to create a minimal event with a startTime."""
+        return {"startTime": start_time}
+
+    def _frozen_dt(self, year, month, day, hour, minute, second=0):
+        return datetime(year, month, day, hour, minute, second,
+                        tzinfo=timezone.utc)
+
+    def _mock_datetime(self, frozen):
+        """Return a mock datetime class that freezes now() to the given datetime."""
+        class MockDatetime:
+            @staticmethod
+            def now(tz=None):
+                if tz is None:
+                    return frozen
+                return frozen.astimezone(tz)
+            fromisoformat = staticmethod(datetime.fromisoformat)
+            def __call__(self, *a, **k):
+                return datetime(*a, **k)
+        return MockDatetime
+
+    # === _get_time_data core tests ===
+
+    def test_get_time_data_tbd(self):
+        """No startTime -> TBD/0urgency/abs TBD."""
+        from browse import _get_time_data
+        td = _get_time_data({})
+        self.assertEqual(td["time_status"], "TBD")
+        self.assertEqual(td["time_urgency"], 0)
+        self.assertEqual(td["abs_time"], "TBD")
+
+    def test_get_time_data_in_30m(self):
+        """Starts in 30 minutes -> 'In 30m', urgency 3."""
+        frozen = self._frozen_dt(2026, 3, 25, 12, 0, 0)
+        with patch('browse.datetime', self._mock_datetime(frozen)):
+            from browse import _get_time_data
+            td = _get_time_data(self._make_event("2026-03-25T12:30:00Z"))
+            self.assertEqual(td["time_status"], "In 30m")
+            self.assertEqual(td["time_urgency"], 3)
+            self.assertIn("WIB", td["abs_time"])
+
+    def test_get_time_data_in_6h(self):
+        """Starts in 6 hours -> 'In 6h', urgency 2."""
+        frozen = self._frozen_dt(2026, 3, 25, 12, 0, 0)
+        with patch('browse.datetime', self._mock_datetime(frozen)):
+            from browse import _get_time_data
+            td = _get_time_data(self._make_event("2026-03-25T18:00:00Z"))
+            self.assertEqual(td["time_status"], "In 6h")
+            self.assertEqual(td["time_urgency"], 2)
+            self.assertIn("WIB", td["abs_time"])
+
+    def test_get_time_data_in_2d(self):
+        """Starts in 2 days -> 'In 2d', urgency 1."""
+        frozen = self._frozen_dt(2026, 3, 25, 12, 0, 0)
+        with patch('browse.datetime', self._mock_datetime(frozen)):
+            from browse import _get_time_data
+            td = _get_time_data(self._make_event("2026-03-27T12:00:00Z"))
+            self.assertEqual(td["time_status"], "In 2d")
+            self.assertEqual(td["time_urgency"], 1)
+
+    def test_get_time_data_live(self):
+        """Started 30 minutes ago -> 'LIVE', urgency 3."""
+        frozen = self._frozen_dt(2026, 3, 25, 12, 30, 0)
+        with patch('browse.datetime', self._mock_datetime(frozen)):
+            from browse import _get_time_data
+            td = _get_time_data(self._make_event("2026-03-25T12:00:00Z"))
+            self.assertEqual(td["time_status"], "LIVE")
+            self.assertEqual(td["time_urgency"], 3)
+            self.assertIn("WIB", td["abs_time"])
+
+    def test_get_time_data_started_2h_ago(self):
+        """Started 2 hours ago -> 'LIVE 2h', urgency 3."""
+        frozen = self._frozen_dt(2026, 3, 25, 14, 0, 0)
+        with patch('browse.datetime', self._mock_datetime(frozen)):
+            from browse import _get_time_data
+            td = _get_time_data(self._make_event("2026-03-25T12:00:00Z"))
+            self.assertEqual(td["time_status"], "LIVE 2h")
+            self.assertEqual(td["time_urgency"], 3)
+
+    def test_get_time_data_started_12h_ago(self):
+        """Started 12 hours ago -> '12h ago', urgency 1."""
+        frozen = self._frozen_dt(2026, 3, 26, 0, 0, 0)
+        with patch('browse.datetime', self._mock_datetime(frozen)):
+            from browse import _get_time_data
+            td = _get_time_data(self._make_event("2026-03-25T12:00:00Z"))
+            self.assertEqual(td["time_status"], "12h ago")
+            self.assertEqual(td["time_urgency"], 1)
+
+    def test_get_time_data_started_2d_ago(self):
+        """Started 2 days ago -> '2d ago', urgency 0."""
+        frozen = self._frozen_dt(2026, 3, 27, 12, 0, 0)
+        with patch('browse.datetime', self._mock_datetime(frozen)):
+            from browse import _get_time_data
+            td = _get_time_data(self._make_event("2026-03-25T12:00:00Z"))
+            self.assertEqual(td["time_status"], "2d ago")
+            self.assertEqual(td["time_urgency"], 0)
+
+    def test_get_time_data_abs_time_format(self):
+        """abs_time is formatted correctly in WIB."""
+        frozen = self._frozen_dt(2026, 3, 25, 12, 0, 0)
+        with patch('browse.datetime', self._mock_datetime(frozen)):
+            from browse import _get_time_data
+            # 19:00 UTC = 02:00 WIB next day
+            td = _get_time_data(self._make_event("2026-03-26T02:00:00Z"))
+            self.assertIn("WIB", td["abs_time"])
+            # UTC 12:00 -> WIB 19:00 same day
+            td2 = _get_time_data(self._make_event("2026-03-25T12:00:00Z"))
+            self.assertEqual(td2["abs_time"], "Mar 25, 19:00 WIB")
 
 
 if __name__ == "__main__":
