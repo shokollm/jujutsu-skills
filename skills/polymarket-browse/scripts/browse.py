@@ -4,6 +4,7 @@ Polymarket Event Browser
 Browse tradeable Polymarket events by game category.
 """
 
+import html
 import json
 import time
 import argparse
@@ -577,6 +578,15 @@ def print_detail(e, detail):
 # TELEGRAM
 # ============================================================
 
+def escape_html(text):
+    """Escape HTML-sensitive characters for Telegram parse_mode=HTML."""
+    return (text
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;"))
+
+
 def send_telegram_message(bot_token, chat_id, text, timeout=10):
     """Send a message via Telegram bot API. Returns the message ID on success.
 
@@ -645,7 +655,7 @@ def send_to_telegram(match_events, non_match_events, category, matches_only=Fals
                 odds_b = format_odds(float(prices[1])) if len(prices) > 1 else "?"
                 tournament = get_tournament(title)
                 title_clean = title.split(" - ")[0].strip() if " - " in title else title
-                lines.append(f"<b>{i}.</b> <a href=\"{url}\">{title_clean}</a>")
+                lines.append(f"<b>{i}.</b> <a href=\"{url}\">{escape_html(title_clean)}</a>")
                 lines.append(f"   {start_time_wib} | {rel_time}")
                 lines.append(f"   Vol: ${vol:,.0f}")
                 if tournament:
@@ -666,7 +676,7 @@ def send_to_telegram(match_events, non_match_events, category, matches_only=Fals
                 start_time_wib, rel_time = get_start_time_wib(e)
                 total_vol = sum(float(m.get("volume", 0)) for m in e.get("markets", []))
                 market_count = len(e.get("markets", []))
-                lines.append(f"<b>{i}.</b> <a href=\"{url}\">{title}</a>")
+                lines.append(f"<b>{i}.</b> <a href=\"{url}\">{escape_html(title)}</a>")
                 lines.append(f"   {start_time_wib} | {rel_time}")
                 lines.append(f"   Markets: {market_count} | Total Vol: ${total_vol:,.0f}")
                 lines.append("")
