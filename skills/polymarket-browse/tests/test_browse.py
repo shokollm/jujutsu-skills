@@ -121,5 +121,85 @@ class TestSendTelegramMessage(unittest.TestCase):
         self.assertIn(b"parse_mode=HTML", req.data)
 
 
+class TestHtmlInjection(unittest.TestCase):
+    """Tests for HTML injection prevention in Telegram messages."""
+
+    @patch.dict('os.environ', {'TELEGRAM_BOT_TOKEN': 'test_token', 'CHAT_ID': 'test_chat'})
+    @patch('browse.send_telegram_message')
+    def test_send_to_telegram_html_injection_in_match_title(self, mock_send_msg):
+        """
+        titles in match events are NOT escaped before inserting into HTML.
+        This test FAILS if HTML chars are unescaped (vulnerable),
+        and PASSES once escape_html() is implemented.
+        """
+        mock_send_msg.return_value = 123
+
+        # Simulate a Polymarket event with HTML injection in the title
+        malicious_event = {
+            "title": "<script>alert('XSS')</script> - Team A vs Team B",
+            "slug": "test-event",
+            "startTime": "2027-03-26T12:00:00Z",
+            "markets": [{
+                "sportsMarketType": "moneyline",
+                "outcomes": '["Team A", "Team B"]',
+                "outcomePrices": "[0.55, 0.45]",
+                "bestBid": "0.54",
+                "bestAsk": "0.56",
+                "volume": 50000,
+                "acceptingOrders": True,
+                "closed": False,
+            }],
+        }
+
+        from browse import send_to_telegram
+        send_to_telegram([malicious_event], [], "Counter Strike")
+
+        # Check what was passed to send_telegram_message
+        self.assertEqual(mock_send_msg.called, True)
+        sent_text = mock_send_msg.call_args[0][2]  # text arg (3rd positional)
+
+        # AFTER FIX: <script> should be escaped as &lt;script&gt;
+        # BEFORE FIX: raw <script> appears in text (vulnerable — test would fail here)
+        self.assertIn("&lt;script&gt;", sent_text,
+            "HTML injection still present — title may NOT be escaped")
+        self.assertIn("&lt;/script&gt;", sent_text)
+
+    @patch.dict('os.environ', {'TELEGRAM_BOT_TOKEN': 'test_token', 'CHAT_ID': 'test_chat'})
+    @patch('browse.send_telegram_message')
+    def test_send_to_telegram_ampersand_in_title(self, mock_send_msg):
+        """
+        Ampersands in titles should be escaped as &amp; when using HTML parse_mode.
+        BEFORE fix: "&" appears raw in the HTML (vulnerable).
+        AFTER fix: "&" appears as "&amp;".
+        """
+        mock_send_msg.return_value = 123
+
+        event_with_ampersand = {
+            "title": "Team A & Team B vs Team C",
+            "slug": "amp-test",
+            "startTime": "2027-03-26T12:00:00Z",
+            "markets": [{
+                "sportsMarketType": "moneyline",
+                "outcomes": '["Team A & Team B", "Team C"]',
+                "outcomePrices": "[0.50, 0.50]",
+                "bestBid": "0.49",
+                "bestAsk": "0.51",
+                "volume": 10000,
+                "acceptingOrders": True,
+                "closed": False,
+            }],
+        }
+
+        from browse import send_to_telegram
+        send_to_telegram([event_with_ampersand], [], "Dota 2")
+
+        sent_text = mock_send_msg.call_args[0][2]
+
+        # AFTER FIX: & should be escaped as &amp;
+        # BEFORE FIX: raw & appears (vulnerable — test would fail here)
+        self.assertIn("&amp;", sent_text,
+            "Ampersand not escaped — title may NOT be escaped")
+
+
 if __name__ == "__main__":
     unittest.main()
