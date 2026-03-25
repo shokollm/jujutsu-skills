@@ -42,52 +42,68 @@ def fetch_page(q, page=1, max_retries=MAX_RETRIES, initial_delay=INITIAL_RETRY_D
     url = (f"{base}?q={q.replace(' ', '%20')}&limit={PAGE_SIZE}&page={page}"
            f"&search_profiles=false&search_tags=false"
            f"&keep_closed_markets=0&events_status=active&cache=false")
-    
+
     delay = initial_delay
     for attempt in range(max_retries):
-        time.sleep(delay)
-        r = subprocess.run(
-            ["curl", "-s", url, "--max-time", "10", "-H", "User-Agent: curl/7.88.1"],
-            capture_output=True
-        )
-        
-        if r.returncode == 0 and len(r.stdout) > 0:
-            try:
-                return json.loads(r.stdout.decode('utf-8'))
-            except json.JSONDecodeError:
-                if attempt < max_retries - 1:
-                    delay *= 2  # Exponential backoff
-                    continue
-                return None
-        else:
-            # Rate limit or other error - exponential backoff
+        if attempt > 0:
+            time.sleep(delay)
+        try:
+            req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urlopen(req, timeout=10) as r:
+                return json.loads(r.read())
+        except Exception:
             if attempt < max_retries - 1:
                 delay *= 2
                 continue
             return None
     return None
 
-def fetch_all_pages(q, max_pages=100):
+def fetch_all_pages(q, matches_max=None, non_matches_max=None):
     """
-    Fetch ALL pages until pagination ends.
-    max_pages is a safety cap to prevent infinite loops.
+    Fetch pages until pagination ends, or until quotas are satisfied.
+
+    Args:
+        q: search query
+        matches_max: stop early once we have this many match events (None = no limit)
+        non_matches_max: stop early once we have this many non-match events (None = no limit)
+
+    Returns:
+        {"events": [...], "total_raw": N, "partial": bool}
     """
     all_events = []
     total_raw = 0
-    for page in range(1, max_pages + 1):
-        time.sleep(0.2)  # small delay between pages (API rate limit is generous)
+    match_count = 0
+    non_match_count = 0
+    page = 0
+    while True:
+        page += 1
+        time.sleep(0.2)
         data = fetch_page(q, page)
         if data is None:
             break
         events = data.get("events", [])
         total_raw = data.get("pagination", {}).get("totalResults", 0)
         all_events.extend(events)
-        # Stop when we get 0 events (no more pages),
-        # OR when we've fetched >= total results
+
+        # Count matches/non-matches in this page
+        for e in events:
+            if is_match_market(e):
+                match_count += 1
+            else:
+                non_match_count += 1
+
+        # Stop if we got what we wanted (only when caps are set)
+        if matches_max is not None and non_matches_max is not None:
+            if match_count >= matches_max and non_match_count >= non_matches_max:
+                break
+
+        # Stop when we get 0 events (no more pages)
         if len(events) == 0:
             break
+        # Stop when we've fetched all known results
         if len(all_events) >= total_raw:
             break
+
     partial = (total_raw > 0 and len(all_events) < total_raw)
     return {"events": all_events, "total_raw": total_raw, "partial": partial}
 
@@ -321,18 +337,39 @@ def sort_events(events):
 # BROWSE
 # ============================================================
 
-def browse_events(q, matches_max=10, non_matches_max=10, tradeable_only=True):
-    result = fetch_all_pages(q)
+def browse_events(q, matches_max=10, non_matches_max=10, tradeable_only=True, sort_by=None):
+    """
+    Browse Polymarket events.
+
+    Args:
+        q: search query
+        matches_max: max number of match markets to return
+        non_matches_max: max number of non-match markets to return
+        tradeable_only: filter to tradeable events only
+        sort_by: None (fast, API order) or "volume" (full fetch, sort by volume desc)
+    """
+    # Pass quotas to fetch_all_pages for early-exit optimization.
+    # Only use early-exit when sort_by is None (no client-side sort needed).
+    use_early_exit = (sort_by is None)
+    fetch_matches_max = matches_max if use_early_exit else None
+    fetch_non_matches_max = non_matches_max if use_early_exit else None
+
+    result = fetch_all_pages(q, matches_max=fetch_matches_max, non_matches_max=fetch_non_matches_max)
     events = result["events"]
     match_events, non_match_events = filter_events(events, tradeable_only)
-    sorted_match = sort_events(match_events)
+
+    # Sort if requested; otherwise preserve API order
+    if sort_by == "volume":
+        match_events = sort_events(match_events)
+        non_match_events = sort_events(non_match_events)
+
     return {
         "query": q,
         "total_raw": result["total_raw"],
         "total_fetched": len(events),
         "total_match": len(match_events),
         "total_non_match": len(non_match_events),
-        "match_events": sorted_match[:matches_max],
+        "match_events": match_events[:matches_max],
         "non_match_events": non_match_events[:non_matches_max],
         "partial": result.get("partial", False),
     }
