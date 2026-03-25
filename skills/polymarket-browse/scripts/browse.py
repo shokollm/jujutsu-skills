@@ -577,6 +577,28 @@ def print_detail(e, detail):
 # TELEGRAM
 # ============================================================
 
+def send_telegram_message(bot_token, chat_id, text, timeout=10):
+    """Send a message via Telegram bot API. Returns the message ID on success.
+
+    Raises:
+        RuntimeError: If the Telegram API returns an error (e.g. invalid token, rate limit).
+        URLError/HTTPError: On network or HTTP-level failures.
+    """
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    data = urlencode({
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": "true",
+    }).encode("utf-8")
+    req = Request(url, data=data, method="POST")
+    with urlopen(req, timeout=timeout) as resp:
+        result = json.loads(resp.read())
+        if not result.get("ok"):
+            raise RuntimeError(f"Telegram API error: {result.get('description')}")
+        return result["result"]["message_id"]
+
+
 def send_to_telegram(match_events, non_match_events, category, matches_only=False, non_matches_only=False):
     """Send browse results to Telegram. Reads TELEGRAM_BOT_TOKEN and CHAT_ID from environment."""
     import os
@@ -596,19 +618,8 @@ def send_to_telegram(match_events, non_match_events, category, matches_only=Fals
     show_non_matches = (not matches_only and not non_matches_only) or non_matches_only
     
     def send(text):
-        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-        data = urlencode({
-            "chat_id": chat_id,
-            "text": text,
-            "parse_mode": "HTML",
-            "disable_web_page_preview": "true",
-        }).encode("utf-8")
-        req = Request(url, data=data, method="POST")
-        with urlopen(req, timeout=10) as resp:
-            result = json.loads(resp.read())
-            if not result.get("ok"):
-                raise RuntimeError(f"Telegram API error: {result.get('description')}")
-            print(f"  Sent msg {result['result']['message_id']}")
+        msg_id = send_telegram_message(bot_token, chat_id, text)
+        print(f"  Sent msg {msg_id}")
     
     # Build sections
     lines = [f"<b>{category.upper()}</b> | {header_date}"]
@@ -737,7 +748,7 @@ def main():
     parser.add_argument("--raw", action="store_true",
                        help="Show all events without tradeable filter (for debugging).")
     parser.add_argument("--telegram", action="store_true",
-                       help="Send results to Telegram (BOT_TOKEN and CHAT_ID must be set in environment).")
+                       help="Send results to Telegram (TELEGRAM_BOT_TOKEN and CHAT_ID must be set in environment).")
     args = parser.parse_args()
     
     if args.list_categories:
