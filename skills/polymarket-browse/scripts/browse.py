@@ -19,6 +19,7 @@ from urllib.request import urlopen, Request
 PAGE_SIZE = 50
 MAX_RETRIES = 5
 INITIAL_RETRY_DELAY = 2  # exponential backoff starts at 2s
+WIB = timezone(timedelta(hours=7))  # UTC+7 for Indonesian users
 
 GAME_CATEGORIES = {
     "All Esports": "Esports",
@@ -221,94 +222,79 @@ def format_spread(bid, ask):
     spread = ask - bid
     return f"{prob_to_cents(spread)}c"
 
-def get_match_time_status(e):
-    """
-    Return a human-readable match time status.
-    Returns (status_str, urgency) where urgency is 0-3 (higher = more urgent/live).
-    Uses startTime for actual match start time.
-    Displays times in WIB (UTC+7 for Indonesian users).
-    """
-    # Use startTime for actual match start, not startDate (which is market creation time)
-    start_str = e.get("startTime") or e.get("startDate", "")
-    
-    if not start_str:
-        return "TBD", 0
-    
-    try:
-        start_dt = datetime.fromisoformat(start_str.replace('Z', '+00:00'))
-        now_utc = datetime.now(timezone.utc)
-        utc7 = timezone(timedelta(hours=7))
-        now = now_utc.astimezone(utc7)
-        start_utc7 = start_dt.astimezone(utc7)
-        
-        delta = start_dt - now_utc
-        
-        if delta.total_seconds() < 0:
-            # Started already
-            hours_ago = abs(delta.total_seconds()) / 3600
-            if hours_ago < 1:
-                return "LIVE", 3
-            elif hours_ago < 4:
-                return f"LIVE {int(hours_ago)}h", 3
-            elif hours_ago < 24:
-                return f"Started {int(hours_ago)}h ago", 1
-            else:
-                days = int(hours_ago / 24)
-                return f"{days}d ago", 0
-        else:
-            # Starts in future
-            hours_until = delta.total_seconds() / 3600
-            if hours_until <= 0:
-                return "LIVE", 3
-            elif hours_until < 1:
-                mins = int(delta.total_seconds() / 60)
-                return f"In {mins}m", 3
-            elif hours_until < 24:
-                return f"In {int(hours_until)}h", 2
-            else:
-                days = int(hours_until / 24)
-                return f"In {days}d", 1
-    except:
-        return "", 0
 
-def get_match_time_str(e):
+def _get_time_data(e, tz=None):
     """
-    Return just the time status string (e.g. 'LIVE', 'In 6h', 'In 1d').
-    Uses startTime for actual match start time.
+    Unified time data extraction for event timestamps.
+
+    Uses startTime (preferred) or startDate as the event start time.
+    Datetime parsing and all relative calculations are UTC-based.
+    The tz parameter only affects the abs_time formatting.
+
+    Args:
+        e: Event dict with 'startTime' or 'startDate' key.
+        tz: datetime.timezone for abs_time formatting.
+            Defaults to WIB (UTC+7).
+
+    Returns:
+        {
+            "time_status": str,    # e.g. "LIVE", "In 6h", "12h ago"
+            "time_urgency": int,  # 0-3 (higher = more urgent/live)
+            "abs_time": str,       # e.g. "Mar 25, 19:00 WIB" or "TBD"
+        }
     """
+    tz = tz or WIB
     start_str = e.get("startTime") or e.get("startDate", "")
+
     if not start_str:
-        return "TBD"
+        return {"time_status": "TBD", "time_urgency": 0, "abs_time": "TBD"}
+
     try:
         start_dt = datetime.fromisoformat(start_str.replace('Z', '+00:00'))
         now_utc = datetime.now(timezone.utc)
         delta = start_dt - now_utc
-        
-        if delta.total_seconds() < 0:
-            hours_ago = abs(delta.total_seconds()) / 3600
+        total_sec = delta.total_seconds()
+
+        if total_sec < 0:
+            # Event is in the past
+            hours_ago = abs(total_sec) / 3600
             if hours_ago < 1:
-                return "LIVE"
+                time_status = "LIVE"
+                time_urgency = 3
             elif hours_ago < 4:
-                return f"LIVE {int(hours_ago)}h"
+                time_status = f"LIVE {int(hours_ago)}h"
+                time_urgency = 3
             elif hours_ago < 24:
-                return f"{int(hours_ago)}h ago"
+                time_status = f"{int(hours_ago)}h ago"
+                time_urgency = 1
             else:
                 days = int(hours_ago / 24)
-                return f"{days}d ago"
+                time_status = f"{days}d ago"
+                time_urgency = 0
         else:
-            hours_until = delta.total_seconds() / 3600
-            if hours_until <= 0:
-                return "LIVE"
-            elif hours_until < 1:
-                mins = int(delta.total_seconds() / 60)
-                return f"In {mins}m"
-            elif hours_until < 24:
-                return f"In {int(hours_until)}h"
+            # Event is in the future
+            if total_sec < 3600:
+                mins = int(total_sec / 60)
+                time_status = f"In {mins}m"
+                time_urgency = 3
+            elif total_sec < 86400:
+                hours_until = int(total_sec / 3600)
+                time_status = f"In {hours_until}h"
+                time_urgency = 2
             else:
-                days = int(hours_until / 24)
-                return f"In {days}d"
-    except:
-        return ""
+                days = int(total_sec / 86400)
+                time_status = f"In {days}d"
+                time_urgency = 1
+
+        abs_time = start_dt.astimezone(tz).strftime("%b %d, %H:%M ")
+        if tz == WIB:
+            abs_time += "WIB"
+        else:
+            abs_time += start_dt.astimezone(tz).strftime("%Z")
+        return {"time_status": time_status, "time_urgency": time_urgency, "abs_time": abs_time}
+    except Exception:
+        return {"time_status": "", "time_urgency": 0, "abs_time": "TBD"}
+
 
 def filter_events(events, tradeable_only=True):
     """
@@ -317,15 +303,16 @@ def filter_events(events, tradeable_only=True):
     """
     match_events = []
     non_match_events = []
-    
+
     for e in events:
         if is_match_market(e):
             if not tradeable_only or is_tradeable_event(e):
                 match_events.append(e)
         else:
             non_match_events.append(e)
-    
+
     return match_events, non_match_events
+
 
 def sort_events(events):
     return sorted(events, key=get_ml_volume, reverse=True)
@@ -361,12 +348,12 @@ def format_event(e):
     best_bid = float(ml.get("bestBid", 0)) if ml else 0
     best_ask = float(ml.get("bestAsk", 0)) if ml else 0
     vol = get_ml_volume(e)
-    time_status, urgency = get_match_time_status(e)
-    
+    td = _get_time_data(e)
+
     return {
         "title": e.get("title", ""),
-        "time_status": time_status,
-        "time_urgency": urgency,
+        "time_status": td["time_status"],
+        "time_urgency": td["time_urgency"],
         "url": get_event_url(e),
         "livestream": e.get("resolutionSource"),
         "outcomes": outcomes,
@@ -384,12 +371,13 @@ def format_detail_event(e):
         if float(m.get("volume", 0)) > 0 and is_tradeable_market(m)
     ]
     active_markets = sorted(active_markets, key=lambda m: float(m.get("volume", 0)), reverse=True)
-    
-    time_status, urgency = get_match_time_status(e)
-    
+
+    td = _get_time_data(e)
+
     return {
         "title": e.get("title", ""),
-        "time_status": time_status,
+        "time_status": td["time_status"],
+        "abs_time": td["abs_time"],
         "url": get_event_url(e),
         "livestream": e.get("resolutionSource"),
         "outcomes": json.loads(ml.get("outcomes", "[]")) if ml else [],
@@ -415,48 +403,6 @@ def format_detail_event(e):
 # ============================================================
 # DISPLAY
 # ============================================================
-
-def get_start_time_wib(e):
-    """Return (date_time_str, relative_str) for display."""
-    start_str = e.get("startTime") or e.get("startDate", "")
-    if not start_str:
-        return "TBD", ""
-    try:
-        start_dt = datetime.fromisoformat(start_str.replace('Z', '+00:00'))
-        now_utc = datetime.now(timezone.utc)
-        utc7 = timezone(timedelta(hours=7))
-        start_utc7 = start_dt.astimezone(utc7)
-        
-        # Absolute: "Mar 25, 19:00 WIB"
-        abs_str = start_utc7.strftime("%b %d, %H:%M WIB")
-        
-        # Relative: "In 5h", "In 10h", "LIVE", etc.
-        delta = start_dt - now_utc
-        if delta.total_seconds() < 0:
-            hours_ago = abs(delta.total_seconds()) / 3600
-            if hours_ago < 1:
-                rel_str = "LIVE"
-            elif hours_ago < 24:
-                rel_str = f"{int(hours_ago)}h ago"
-            else:
-                days = int(hours_ago / 24)
-                rel_str = f"{days}d ago"
-        else:
-            hours_until = delta.total_seconds() / 3600
-            if hours_until <= 0:
-                rel_str = "LIVE"
-            elif hours_until < 1:
-                mins_until = int(delta.total_seconds() / 60)
-                rel_str = f"In {mins_until}m"
-            elif hours_until < 24:
-                rel_str = f"In {int(hours_until)}h"
-            else:
-                days = int(hours_until / 24)
-                rel_str = f"In {days}d"
-        
-        return abs_str, rel_str
-    except:
-        return "TBD", ""
 
 def get_header_date():
     """Return current date string like 'Mar 25, 2026'"""
@@ -513,7 +459,9 @@ def print_browse(match_events, non_match_events, category, total_raw, total_fetc
                 vol = f["volume"]
                 title = f["title"]
                 url = f["url"]
-                start_time_wib, rel_time = get_start_time_wib(e)
+                td = _get_time_data(e)
+                start_time_wib = td["abs_time"]
+                rel_time = td["time_status"]
                 
                 team_a = outcomes[0] if len(outcomes) > 0 else "?"
                 team_b = outcomes[1] if len(outcomes) > 1 else "?"
@@ -541,8 +489,10 @@ def print_browse(match_events, non_match_events, category, total_raw, total_fetc
         for i, e in enumerate(non_match_events[:non_matches_max], 1):
             title = e.get("title", "?")
             url = get_event_url(e)
-            start_time_wib, rel_time = get_start_time_wib(e)
-            
+            td = _get_time_data(e)
+            start_time_wib = td["abs_time"]
+            rel_time = td["time_status"]
+
             total_vol = sum(float(m.get("volume", 0)) for m in e.get("markets", []))
             market_count = len(e.get("markets", []))
             
@@ -551,17 +501,11 @@ def print_browse(match_events, non_match_events, category, total_raw, total_fetc
             print(f"     Markets: {market_count} | Total Vol: ${total_vol:,.0f}")
 
 def print_detail(e, detail):
-    from datetime import datetime, timezone, timedelta
-    now_utc = datetime.now(timezone.utc)
-    utc7 = timezone(timedelta(hours=7))
-    now_utc7 = now_utc.astimezone(utc7)
-    
     print(f"\n{detail['title']}")
     print(f"URL: {detail['url']}")
     print(f"Livestream: {detail['livestream']}")
-    
+
     spread_str = format_spread(detail["best_bid"], detail["best_ask"]) if detail["best_bid"] and detail["best_ask"] else "N/A"
-    time_str = get_match_time_str(e)
     print(f"\n{detail['time_status']}")
     print(f"ML: {detail['outcomes'][0]} {format_odds(float(detail['prices'][0]))} vs {detail['outcomes'][1]} {format_odds(float(detail['prices'][1]))}")
     print(f"ML Vol: ${detail['volume']:,.0f} | {spread_str}")
@@ -648,7 +592,9 @@ def send_to_telegram(match_events, non_match_events, category, matches_only=Fals
                 vol = get_ml_volume(e)
                 title = e.get("title", "?")
                 url = get_event_url(e)
-                start_time_wib, rel_time = get_start_time_wib(e)
+                td = _get_time_data(e)
+                start_time_wib = td["abs_time"]
+                rel_time = td["time_status"]
                 team_a = outcomes[0] if len(outcomes) > 0 else "?"
                 team_b = outcomes[1] if len(outcomes) > 1 else "?"
                 odds_a = format_odds(float(prices[0])) if len(prices) > 0 else "?"
@@ -673,7 +619,9 @@ def send_to_telegram(match_events, non_match_events, category, matches_only=Fals
             for i, e in enumerate(non_match_events, 1):
                 title = e.get("title", "?")
                 url = get_event_url(e)
-                start_time_wib, rel_time = get_start_time_wib(e)
+                td = _get_time_data(e)
+                start_time_wib = td["abs_time"]
+                rel_time = td["time_status"]
                 total_vol = sum(float(m.get("volume", 0)) for m in e.get("markets", []))
                 market_count = len(e.get("markets", []))
                 lines.append(f"<b>{i}.</b> <a href=\"{url}\">{escape_html(title)}</a>")
