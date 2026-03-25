@@ -256,7 +256,9 @@ def get_match_time_status(e):
         else:
             # Starts in future
             hours_until = delta.total_seconds() / 3600
-            if hours_until < 1:
+            if hours_until <= 0:
+                return "LIVE", 3
+            elif hours_until < 1:
                 mins = int(delta.total_seconds() / 60)
                 return f"In {mins}m", 3
             elif hours_until < 24:
@@ -293,7 +295,9 @@ def get_match_time_str(e):
                 return f"{days}d ago"
         else:
             hours_until = delta.total_seconds() / 3600
-            if hours_until < 1:
+            if hours_until <= 0:
+                return "LIVE"
+            elif hours_until < 1:
                 mins = int(delta.total_seconds() / 60)
                 return f"In {mins}m"
             elif hours_until < 24:
@@ -437,7 +441,9 @@ def get_start_time_wib(e):
                 rel_str = f"{days}d ago"
         else:
             hours_until = delta.total_seconds() / 3600
-            if hours_until < 1:
+            if hours_until <= 0:
+                rel_str = "LIVE"
+            elif hours_until < 1:
                 mins_until = int(delta.total_seconds() / 60)
                 rel_str = f"In {mins_until}m"
             elif hours_until < 24:
