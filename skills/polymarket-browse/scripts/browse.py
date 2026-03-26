@@ -220,6 +220,7 @@ def fetch_all_pages(
 
     total_raw = 0
     page_count = 0
+    page1_data = None
 
     while True:
         page_count += 1
@@ -227,33 +228,39 @@ def fetch_all_pages(
         if data is None:
             break
         total_raw = data.get("pagination", {}).get("totalResults", 0)
+        if page_count == 1:
+            page1_data = data
         if total_raw > 0:
             break
         if not data.get("events"):
             break
 
-    if total_raw == 0:
+    if total_raw == 0 or page1_data is None:
         return {"events": [], "total_raw": 0, "partial": False}
 
-    # API always returns exactly 5 events per page regardless of 'limit' param.
-    # This is integer ceiling division: ceil(total_raw / 5) = (total_raw + 5 - 1) // 5 = (total_raw + 4) // 5
-    total_pages = (total_raw + 4) // 5
+    page1_events = page1_data.get("events", [])
+    actual_page_size = len(page1_events)
+
+    # Use actual events per page from API for ceiling division
+    # ceil(total_raw / actual_page_size) = (total_raw + actual_page_size - 1) // actual_page_size
+    total_pages = (total_raw + actual_page_size - 1) // actual_page_size
     concurrency = min(MAX_PARALLEL_FETCHES, total_pages)
 
-    all_page_data: dict[int, list[Any]] = {}
+    all_page_data: dict[int, list[Any]] = {1: page1_events}
 
-    with ThreadPoolExecutor(max_workers=concurrency) as executor:
-        futures = {
-            executor.submit(_fetch_page_with_index, q, page): page
-            for page in range(1, total_pages + 1)
-        }
-        for future in as_completed(futures):
-            try:
-                page_num, data = future.result()
-                if data is not None:
-                    all_page_data[page_num] = data.get("events", [])
-            except Exception:
-                pass
+    if total_pages > 1:
+        with ThreadPoolExecutor(max_workers=concurrency) as executor:
+            futures = {
+                executor.submit(_fetch_page_with_index, q, page): page
+                for page in range(2, total_pages + 1)
+            }
+            for future in as_completed(futures):
+                try:
+                    page_num, data = future.result()
+                    if data is not None:
+                        all_page_data[page_num] = data.get("events", [])
+                except Exception:
+                    pass
 
     all_events = []
     for page_num in sorted(all_page_data.keys()):

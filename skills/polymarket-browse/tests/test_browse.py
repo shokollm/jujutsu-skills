@@ -1117,6 +1117,7 @@ class TestFetchAllPages(unittest.TestCase):
                 },
                 {"id": "n1", "title": "Non-match 1", "markets": []},
                 {"id": "n2", "title": "Non-match 2", "markets": []},
+                {"id": "e1", "title": "Extra 1", "markets": []},
             ],
             "pagination": {"totalResults": 20, "hasMore": True},
         }
@@ -1130,21 +1131,35 @@ class TestFetchAllPages(unittest.TestCase):
                     "markets": [],
                 },
                 {"id": "n3", "title": "Non-match 3", "markets": []},
+                {"id": "e2", "title": "Extra 2", "markets": []},
+                {"id": "e3", "title": "Extra 3", "markets": []},
+                {"id": "e4", "title": "Extra 4", "markets": []},
             ],
             "pagination": {"totalResults": 20, "hasMore": True},
         }
         page3 = {
-            "events": [],
+            "events": [
+                {"id": "e5", "title": "Extra 5", "markets": []},
+                {"id": "e6", "title": "Extra 6", "markets": []},
+                {"id": "e7", "title": "Extra 7", "markets": []},
+                {"id": "e8", "title": "Extra 8", "markets": []},
+                {"id": "e9", "title": "Extra 9", "markets": []},
+            ],
             "pagination": {"totalResults": 20, "hasMore": True},
         }
         page4 = {
-            "events": [],
+            "events": [
+                {"id": "e10", "title": "Extra 10", "markets": []},
+                {"id": "e11", "title": "Extra 11", "markets": []},
+                {"id": "e12", "title": "Extra 12", "markets": []},
+                {"id": "e13", "title": "Extra 13", "markets": []},
+                {"id": "e14", "title": "Extra 14", "markets": []},
+            ],
             "pagination": {"totalResults": 20, "hasMore": True},
         }
 
         mock_fetch_page.return_value = page1
         mock_parallel_fetch.side_effect = [
-            (1, page1),
             (2, page2),
             (3, page3),
             (4, page4),
@@ -1155,7 +1170,7 @@ class TestFetchAllPages(unittest.TestCase):
         )
 
         self.assertEqual(mock_fetch_page.call_count, 1)
-        self.assertEqual(mock_parallel_fetch.call_count, 4)
+        self.assertEqual(mock_parallel_fetch.call_count, 3)
         self.assertEqual(len(result["events"]), 6)
 
     @patch("browse._read_cache", return_value=None)
@@ -1168,27 +1183,45 @@ class TestFetchAllPages(unittest.TestCase):
         from browse import fetch_all_pages
 
         page1 = {
-            "events": [{"id": "e1", "title": "Event 1", "markets": []}],
+            "events": [
+                {"id": "e1", "title": "Event 1", "markets": []},
+                {"id": "e2", "title": "Event 2", "markets": []},
+                {"id": "e3", "title": "Event 3", "markets": []},
+                {"id": "e4", "title": "Event 4", "markets": []},
+                {"id": "e5", "title": "Event 5", "markets": []},
+            ],
             "pagination": {"totalResults": 15, "hasMore": True},
         }
         page2 = {
-            "events": [{"id": "e2", "title": "Event 2", "markets": []}],
+            "events": [
+                {"id": "e6", "title": "Event 6", "markets": []},
+                {"id": "e7", "title": "Event 7", "markets": []},
+                {"id": "e8", "title": "Event 8", "markets": []},
+                {"id": "e9", "title": "Event 9", "markets": []},
+                {"id": "e10", "title": "Event 10", "markets": []},
+            ],
             "pagination": {"totalResults": 15, "hasMore": True},
         }
         page3 = {
-            "events": [{"id": "e3", "title": "Event 3", "markets": []}],
+            "events": [
+                {"id": "e11", "title": "Event 11", "markets": []},
+                {"id": "e12", "title": "Event 12", "markets": []},
+                {"id": "e13", "title": "Event 13", "markets": []},
+                {"id": "e14", "title": "Event 14", "markets": []},
+                {"id": "e15", "title": "Event 15", "markets": []},
+            ],
             "pagination": {"totalResults": 15, "hasMore": False},
         }
 
         mock_fetch_page.return_value = page1
-        mock_parallel_fetch.side_effect = [(1, page1), (2, page2), (3, page3)]
+        mock_parallel_fetch.side_effect = [(2, page2), (3, page3)]
 
         result = fetch_all_pages("test", use_cache=False)
 
         self.assertEqual(mock_fetch_page.call_count, 1)
-        self.assertEqual(mock_parallel_fetch.call_count, 3)
-        self.assertEqual(len(result["events"]), 3)
-        self.assertTrue(result["partial"])
+        self.assertEqual(mock_parallel_fetch.call_count, 2)
+        self.assertEqual(len(result["events"]), 15)
+        self.assertFalse(result["partial"])
 
     @patch("browse._read_cache", return_value=None)
     @patch("browse._fetch_page_with_index")
@@ -1222,6 +1255,8 @@ class TestFetchAllPages(unittest.TestCase):
                     "gameId": "3",
                     "markets": [],
                 },
+                {"id": "e1", "title": "Extra 1", "markets": []},
+                {"id": "e2", "title": "Extra 2", "markets": []},
             ],
             "pagination": {"totalResults": 20, "hasMore": True},
         }
@@ -1230,31 +1265,168 @@ class TestFetchAllPages(unittest.TestCase):
                 {"id": "n1", "title": "Non-match 1", "markets": []},
                 {"id": "n2", "title": "Non-match 2", "markets": []},
                 {"id": "n3", "title": "Non-match 3", "markets": []},
+                {"id": "e3", "title": "Extra 3", "markets": []},
+                {"id": "e4", "title": "Extra 4", "markets": []},
             ],
             "pagination": {"totalResults": 20, "hasMore": True},
         }
         page3 = {
-            "events": [],
+            "events": [
+                {"id": "e5", "title": "Extra 5", "markets": []},
+                {"id": "e6", "title": "Extra 6", "markets": []},
+                {"id": "e7", "title": "Extra 7", "markets": []},
+                {"id": "e8", "title": "Extra 8", "markets": []},
+                {"id": "e9", "title": "Extra 9", "markets": []},
+            ],
             "pagination": {"totalResults": 20, "hasMore": True},
         }
         page4 = {
-            "events": [],
+            "events": [
+                {"id": "e10", "title": "Extra 10", "markets": []},
+                {"id": "e11", "title": "Extra 11", "markets": []},
+                {"id": "e12", "title": "Extra 12", "markets": []},
+                {"id": "e13", "title": "Extra 13", "markets": []},
+                {"id": "e14", "title": "Extra 14", "markets": []},
+            ],
             "pagination": {"totalResults": 20, "hasMore": True},
         }
 
         mock_fetch_page.return_value = page1
-        mock_parallel_fetch.side_effect = [
-            (1, page1),
-            (2, page2),
-            (3, page3),
-            (4, page4),
-        ]
+        mock_parallel_fetch.side_effect = [(2, page2), (3, page3), (4, page4)]
 
         result = fetch_all_pages(
             "test", matches_max=3, non_matches_max=3, use_cache=False
         )
 
-        self.assertEqual(mock_parallel_fetch.call_count, 4)
+        self.assertEqual(mock_parallel_fetch.call_count, 3)
+        self.assertEqual(len(result["events"]), 6)
+
+    @patch("browse._read_cache", return_value=None)
+    @patch("browse._fetch_page_with_index")
+    @patch("browse.fetch_page")
+    def test_no_quota_fetches_all_pages(
+        self, mock_fetch_page, mock_parallel_fetch, mock_cache
+    ):
+        """Without quotas, fetches all pages until pagination ends."""
+        from browse import fetch_all_pages
+
+        page1 = {
+            "events": [
+                {"id": "e1", "title": "Event 1", "markets": []},
+                {"id": "e2", "title": "Event 2", "markets": []},
+                {"id": "e3", "title": "Event 3", "markets": []},
+                {"id": "e4", "title": "Event 4", "markets": []},
+                {"id": "e5", "title": "Event 5", "markets": []},
+            ],
+            "pagination": {"totalResults": 15, "hasMore": True},
+        }
+        page2 = {
+            "events": [
+                {"id": "e6", "title": "Event 6", "markets": []},
+                {"id": "e7", "title": "Event 7", "markets": []},
+                {"id": "e8", "title": "Event 8", "markets": []},
+                {"id": "e9", "title": "Event 9", "markets": []},
+                {"id": "e10", "title": "Event 10", "markets": []},
+            ],
+            "pagination": {"totalResults": 15, "hasMore": True},
+        }
+        page3 = {
+            "events": [
+                {"id": "e11", "title": "Event 11", "markets": []},
+                {"id": "e12", "title": "Event 12", "markets": []},
+                {"id": "e13", "title": "Event 13", "markets": []},
+                {"id": "e14", "title": "Event 14", "markets": []},
+                {"id": "e15", "title": "Event 15", "markets": []},
+            ],
+            "pagination": {"totalResults": 15, "hasMore": False},
+        }
+
+        mock_fetch_page.return_value = page1
+        mock_parallel_fetch.side_effect = [(2, page2), (3, page3)]
+
+        result = fetch_all_pages("test", use_cache=False)
+
+        self.assertEqual(mock_fetch_page.call_count, 1)
+        self.assertEqual(mock_parallel_fetch.call_count, 2)
+        self.assertEqual(len(result["events"]), 15)
+        self.assertFalse(result["partial"])
+
+    @patch("browse._read_cache", return_value=None)
+    @patch("browse._fetch_page_with_index")
+    @patch("browse.fetch_page")
+    def test_quota_one_side_only_keeps_fetching(
+        self, mock_fetch_page, mock_parallel_fetch, mock_cache
+    ):
+        """If only one quota is met, keeps fetching."""
+        from browse import fetch_all_pages
+
+        page1 = {
+            "events": [
+                {
+                    "id": "m1",
+                    "title": "Match 1",
+                    "seriesSlug": "x",
+                    "gameId": "1",
+                    "markets": [],
+                },
+                {
+                    "id": "m2",
+                    "title": "Match 2",
+                    "seriesSlug": "x",
+                    "gameId": "2",
+                    "markets": [],
+                },
+                {
+                    "id": "m3",
+                    "title": "Match 3",
+                    "seriesSlug": "x",
+                    "gameId": "3",
+                    "markets": [],
+                },
+                {"id": "e1", "title": "Extra 1", "markets": []},
+                {"id": "e2", "title": "Extra 2", "markets": []},
+            ],
+            "pagination": {"totalResults": 20, "hasMore": True},
+        }
+        page2 = {
+            "events": [
+                {"id": "n1", "title": "Non-match 1", "markets": []},
+                {"id": "n2", "title": "Non-match 2", "markets": []},
+                {"id": "n3", "title": "Non-match 3", "markets": []},
+                {"id": "e3", "title": "Extra 3", "markets": []},
+                {"id": "e4", "title": "Extra 4", "markets": []},
+            ],
+            "pagination": {"totalResults": 20, "hasMore": True},
+        }
+        page3 = {
+            "events": [
+                {"id": "e5", "title": "Extra 5", "markets": []},
+                {"id": "e6", "title": "Extra 6", "markets": []},
+                {"id": "e7", "title": "Extra 7", "markets": []},
+                {"id": "e8", "title": "Extra 8", "markets": []},
+                {"id": "e9", "title": "Extra 9", "markets": []},
+            ],
+            "pagination": {"totalResults": 20, "hasMore": True},
+        }
+        page4 = {
+            "events": [
+                {"id": "e10", "title": "Extra 10", "markets": []},
+                {"id": "e11", "title": "Extra 11", "markets": []},
+                {"id": "e12", "title": "Extra 12", "markets": []},
+                {"id": "e13", "title": "Extra 13", "markets": []},
+                {"id": "e14", "title": "Extra 14", "markets": []},
+            ],
+            "pagination": {"totalResults": 20, "hasMore": True},
+        }
+
+        mock_fetch_page.return_value = page1
+        mock_parallel_fetch.side_effect = [(2, page2), (3, page3), (4, page4)]
+
+        result = fetch_all_pages(
+            "test", matches_max=3, non_matches_max=3, use_cache=False
+        )
+
+        self.assertEqual(mock_parallel_fetch.call_count, 3)
         self.assertEqual(len(result["events"]), 6)
 
 
@@ -1271,7 +1443,13 @@ class TestParallelFetchConcurrency(unittest.TestCase):
         from browse import fetch_all_pages
 
         page = {
-            "events": [{"id": "e1", "title": "Event 1", "markets": []}],
+            "events": [
+                {"id": "e1", "title": "Event 1", "markets": []},
+                {"id": "e2", "title": "Event 2", "markets": []},
+                {"id": "e3", "title": "Event 3", "markets": []},
+                {"id": "e4", "title": "Event 4", "markets": []},
+                {"id": "e5", "title": "Event 5", "markets": []},
+            ],
             "pagination": {"totalResults": 50, "hasMore": True},
         }
         mock_fetch_page.return_value = page
@@ -1279,8 +1457,9 @@ class TestParallelFetchConcurrency(unittest.TestCase):
 
         result = fetch_all_pages("test", use_cache=False)
 
-        total_pages = (50 + 4) // 5  # = 10 pages (API returns 5 per page)
-        self.assertEqual(mock_parallel_fetch.call_count, total_pages)
+        total_pages = (50 + 5 - 1) // 5  # = 10 pages (API returns 5 per page)
+        # Page 1 is fetched in probe loop, so executor only fetches pages 2-10 (9 calls)
+        self.assertEqual(mock_parallel_fetch.call_count, total_pages - 1)
 
     @patch("browse._read_cache", return_value=None)
     @patch("browse._fetch_page_with_index")
