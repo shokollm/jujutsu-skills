@@ -383,7 +383,7 @@ def is_tradeable_event(e: dict[str, Any]) -> bool:
             now = datetime.now(timezone.utc)
             if end_dt < now:
                 return False
-        except:
+        except (ValueError, TypeError):
             pass
 
     # Filter: match has already started (startTime is in the past)
@@ -397,7 +397,7 @@ def is_tradeable_event(e: dict[str, Any]) -> bool:
                 hours_ago = (now - start_dt).total_seconds() / 3600
                 if hours_ago > 4:
                     return False
-        except:
+        except (ValueError, TypeError):
             pass
 
     return True
