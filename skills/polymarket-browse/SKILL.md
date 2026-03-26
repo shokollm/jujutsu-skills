@@ -34,7 +34,7 @@ hermes mcp add polymarket https://docs.polymarket.com/mcp
 ## Usage
 
 ```
-polymarket-browse [--category "Counter Strike"] [--limit 5] [--matches N] [--non-matches N] [--search "TeamName"] [--matches-only] [--non-matches-only] [--detail N] [--raw] [--telegram]
+polymarket-browse [--category "Counter Strike"] [--limit 5] [--matches N] [--non-matches N] [--search "TeamName"] [--matches-only] [--non-matches-only] [--detail N] [--raw] [--telegram] [--no-cache] [--max-total N]
 ```
 
 ## Arguments
@@ -49,6 +49,8 @@ polymarket-browse [--category "Counter Strike"] [--limit 5] [--matches N] [--non
 - `--detail` : Index of match event (1-indexed) to show detailed markets. Default: 1. Set to 0 to disable.
 - `--list-categories` : List available game categories and exit
 - `--raw` : Show all events without tradeable filter (for debugging). Includes fetch stats.
+- `--no-cache` : Disable caching and fetch fresh data from the API.
+- `--max-total` : Maximum total events to fetch before early exit. Default: no limit. Useful for quick snapshots.
 - `--telegram` : Send results to Telegram. Requires `BOT_TOKEN` and `CHAT_ID` in environment variables.
 
 ## Output Format
@@ -120,10 +122,29 @@ Use `--raw` to disable the tradeable filter and see all match markets regardless
 
 The script fetches **ALL pages** until the API runs out of results (up to 100 pages as a safety cap).
 
+### Parallel Fetching
+
+Pages are fetched in **parallel batches of 5** using ThreadPoolExecutor. This significantly reduces fetch time:
+
+| Scenario | Without Parallelization | With Parallelization |
+|----------|------------------------|---------------------|
+| 10 pages (50 events) | ~20s (2s per page × 10) | ~4s (2s per batch × 2 batches) |
+| 20 pages (100 events) | ~40s | ~8s |
+
+The script first fetches page 1 to determine total pages, then fetches remaining pages in parallel batches of 5.
+
 ## Rate Limiting
 
 - Exponential backoff: 2s → 4s → 8s → 16s → 32s
 - Max 5 retries before aborting
+
+## Caching
+
+Results are cached in `~/.cache/polymarket-browse/` with a **5-minute TTL** to reduce redundant API calls.
+
+- Use `--no-cache` to bypass the cache and fetch fresh data
+- Cached data is automatically used when available and not expired
+- Useful when running the script repeatedly (e.g., for monitoring)
 
 ## Odds Format
 
