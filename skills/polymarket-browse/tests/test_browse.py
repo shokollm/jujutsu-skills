@@ -1839,5 +1839,48 @@ class TestBrowseEvents(unittest.TestCase):
         self.assertIn("partial", result)
 
 
+class TestTimezoneParsing(unittest.TestCase):
+    """Tests for parse_timezone() and timezone display."""
+
+    def test_parse_timezone_utc_plus7(self):
+        """UTC+7 should parse to WIB."""
+        from browse import parse_timezone
+        from datetime import timezone, timedelta
+
+        tz = parse_timezone("UTC+7")
+        self.assertEqual(tz, timezone(timedelta(hours=7)))
+
+    def test_parse_timezone_utc_minus5(self):
+        """UTC-5 should parse correctly."""
+        from browse import parse_timezone
+        from datetime import timezone, timedelta
+
+        tz = parse_timezone("UTC-5")
+        self.assertEqual(tz, timezone(timedelta(hours=-5)))
+
+    def test_parse_timezone_utc_no_offset(self):
+        """UTC should return timezone.utc."""
+        from browse import parse_timezone
+
+        tz = parse_timezone("UTC")
+        self.assertEqual(tz, timezone.utc)
+
+    def test_parse_timezone_with_minutes(self):
+        """UTC+5:30 should parse correctly."""
+        from browse import parse_timezone
+        from datetime import timezone, timedelta
+
+        tz = parse_timezone("UTC+5:30")
+        self.assertEqual(tz, timezone(timedelta(hours=5, minutes=30)))
+
+    def test_parse_timezone_invalid_falls_back_to_wib(self):
+        """Invalid timezone should fall back to WIB."""
+        from browse import parse_timezone
+        from datetime import timezone, timedelta
+
+        tz = parse_timezone("Invalid/Timezone")
+        self.assertEqual(tz, timezone(timedelta(hours=7)))
+
+
 if __name__ == "__main__":
     unittest.main()

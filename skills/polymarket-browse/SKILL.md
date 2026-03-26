@@ -35,7 +35,7 @@ hermes mcp add polymarket https://docs.polymarket.com/mcp
 ## Usage
 
 ```
-polymarket-browse [--category "Counter Strike"] [--limit 5] [--matches N] [--non-matches N] [--search "TeamName"] [--matches-only] [--non-matches-only] [--detail N] [--raw] [--telegram] [--no-cache] [--max-total N]
+polymarket-browse [--category "Counter Strike"] [--limit 5] [--matches N] [--non-matches N] [--search "TeamName"] [--matches-only] [--non-matches-only] [--detail N] [--raw] [--telegram] [--no-cache] [--max-total N] [--timezone UTC+X]
 ```
 
 ## Arguments
@@ -52,6 +52,7 @@ polymarket-browse [--category "Counter Strike"] [--limit 5] [--matches N] [--non
 - `--raw` : Show all events without tradeable filter (for debugging). Includes fetch stats.
 - `--no-cache` : Disable caching and fetch fresh data from the API.
 - `--max-total` : Maximum total events to fetch before early exit. Default: no limit. Useful for quick snapshots.
+- `--timezone` : Timezone for displaying times. Format: `UTC+X` or `UTC-X` (e.g., `UTC+7`, `UTC-5`). Default: UTC+7 (WIB).
 - `--telegram` : Send results to Telegram. Requires `BOT_TOKEN` and `CHAT_ID` in environment variables.
 
 ## Output Format

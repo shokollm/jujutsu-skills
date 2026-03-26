@@ -98,6 +98,45 @@ PAGE_SIZE = 50
 MAX_RETRIES = 5
 INITIAL_RETRY_DELAY = 2  # exponential backoff starts at 2s
 WIB = timezone(timedelta(hours=7))  # UTC+7 for Indonesian users
+_DISPLAY_TZ = WIB  # Module-level timezone for display (configurable via --timezone)
+
+
+def parse_timezone(tz_str: str) -> timezone:
+    """
+    Parse timezone string to datetime.timezone.
+    Supports: UTC offset format (UTC+7, UTC-5).
+    Falls back to WIB (UTC+7) on parse failure.
+    """
+    tz_str = tz_str.strip()
+    if tz_str.startswith("UTC"):
+        offset_str = tz_str[3:].strip()
+        if not offset_str:
+            return timezone.utc
+        sign = -1 if offset_str[0] == "-" else 1
+        if offset_str[0] in "+-":
+            offset_str = offset_str[1:]
+        try:
+            if ":" in offset_str:
+                hours, minutes = offset_str.split(":")
+                hours = int(hours)
+                minutes = int(minutes)
+            else:
+                hours = int(offset_str)
+                minutes = 0
+            total_minutes = hours * 60 + minutes
+            if sign == -1:
+                total_minutes = -total_minutes
+            return timezone(timedelta(minutes=total_minutes))
+        except ValueError:
+            return WIB
+    return WIB
+    try:
+        from datetime import ZoneInfo
+
+        return ZoneInfo(tz_str).utcoffset(None)
+    except Exception:
+        return WIB
+
 
 GAME_CATEGORIES = {
     "All Esports": "Esports",
@@ -453,12 +492,12 @@ def _get_time_data(e: dict[str, Any], tz: timezone | None = None) -> TimeData:
     Args:
         e: Event dict with 'startTime' or 'startDate' key.
         tz: datetime.timezone for abs_time formatting.
-            Defaults to WIB (UTC+7).
+            Defaults to _DISPLAY_TZ (set via --timezone, or WIB).
 
     Returns:
         TimeData with time_status, time_urgency, and abs_time
     """
-    tz = tz or WIB
+    tz = tz or _DISPLAY_TZ
     start_str = e.get("startTime") or e.get("startDate", "")
 
     if not start_str:
@@ -819,11 +858,10 @@ def format_detail_event(e: dict[str, Any]) -> DetailEvent:
 
 
 def get_header_date() -> str:
-    """Return current date string like 'Mar 25, 2026'"""
+    """Return current date string like 'Mar 25, 2026' in display timezone."""
     now_utc = datetime.now(timezone.utc)
-    utc7 = timezone(timedelta(hours=7))
-    now_utc7 = now_utc.astimezone(utc7)
-    return now_utc7.strftime("%b %d, %Y")
+    now_display = now_utc.astimezone(_DISPLAY_TZ)
+    return now_display.strftime("%b %d, %Y")
 
 
 def get_tournament(title: str) -> str:
@@ -1175,6 +1213,12 @@ def main() -> None:
         help="Max total events to fetch before early exit. Default: no limit.",
     )
     parser.add_argument(
+        "--timezone",
+        type=str,
+        default="UTC+7",
+        help="Timezone for displaying times (e.g., UTC+7, UTC-5). Default: UTC+7",
+    )
+    parser.add_argument(
         "--telegram",
         action="store_true",
         help="Send results to Telegram (TELEGRAM_BOT_TOKEN and CHAT_ID must be set in environment).",
@@ -1192,6 +1236,9 @@ def main() -> None:
     tradeable_only = not args.raw
     matches_max = args.matches if args.matches is not None else args.limit
     non_matches_max = args.non_matches if args.non_matches is not None else args.limit
+
+    global _DISPLAY_TZ
+    _DISPLAY_TZ = parse_timezone(args.timezone)
 
     if args.search:
         print(f"\nFetching {args.category} events matching '{args.search}'...")
