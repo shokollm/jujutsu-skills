@@ -8,6 +8,7 @@ import unittest
 from unittest.mock import patch, MagicMock
 import sys
 import os
+import time
 from datetime import datetime, timezone, timedelta
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
@@ -1255,6 +1256,192 @@ class TestFetchAllPages(unittest.TestCase):
 
         self.assertEqual(mock_parallel_fetch.call_count, 4)
         self.assertEqual(len(result["events"]), 6)
+
+
+class TestParallelFetchConcurrency(unittest.TestCase):
+    """Tests for parallel page fetching concurrency."""
+
+    @patch("browse._read_cache", return_value=None)
+    @patch("browse._fetch_page_with_index")
+    @patch("browse.fetch_page")
+    def test_parallel_fetch_uses_batch_size_of_5(
+        self, mock_fetch_page, mock_parallel_fetch, mock_cache
+    ):
+        """With 10 pages (totalResults=500), verify concurrency=5 means 5 calls per batch."""
+        from browse import fetch_all_pages
+
+        page = {
+            "events": [{"id": "e1", "title": "Event 1", "markets": []}],
+            "pagination": {"totalResults": 500, "hasMore": True},
+        }
+        mock_fetch_page.return_value = page
+        mock_parallel_fetch.return_value = (1, page)
+
+        result = fetch_all_pages("test", use_cache=False)
+
+        total_pages = (500 + 50 - 1) // 50  # = 10 pages
+        concurrency = min(5, total_pages)  # = 5
+        expected_batches = (total_pages + concurrency - 1) // concurrency  # = 2 batches
+
+        self.assertEqual(mock_parallel_fetch.call_count, 10)
+
+    @patch("browse._read_cache", return_value=None)
+    @patch("browse._fetch_page_with_index")
+    @patch("browse.fetch_page")
+    def test_parallel_fetch_respects_concurrency_limit(
+        self, mock_fetch_page, mock_parallel_fetch, mock_cache
+    ):
+        """Verify that at most MAX_PARALLEL_FETCHES (5) requests run concurrently."""
+        from browse import fetch_all_pages, MAX_PARALLEL_FETCHES
+
+        page = {
+            "events": [{"id": "e1", "title": "Event 1", "markets": []}],
+            "pagination": {"totalResults": 500, "hasMore": True},
+        }
+        mock_fetch_page.return_value = page
+        mock_parallel_fetch.return_value = (1, page)
+
+        result = fetch_all_pages("test", use_cache=False)
+
+        self.assertEqual(MAX_PARALLEL_FETCHES, 5)
+
+
+class TestCacheFunctions(unittest.TestCase):
+    """Tests for cache read/write functions."""
+
+    @patch("browse.CACHE_DIR", "/tmp/test_cache")
+    @patch("browse.os.path.exists")
+    @patch("browse.os.path.getmtime")
+    @patch("builtins.open", side_effect=FileNotFoundError)
+    @patch("json.load")
+    def test_read_cache_returns_none_when_file_not_found(
+        self, mock_json, mock_open, mock_mtime, mock_exists
+    ):
+        """_read_cache returns None if cache file does not exist."""
+        from browse import _read_cache
+
+        mock_exists.return_value = False
+
+        result = _read_cache("test_query")
+
+        self.assertIsNone(result)
+
+    @patch("browse.CACHE_DIR", "/tmp/test_cache")
+    @patch("browse.os.makedirs")
+    @patch("builtins.open")
+    @patch("json.dump")
+    def test_write_cache_creates_directory_if_needed(
+        self, mock_json_dump, mock_open, mock_makedirs
+    ):
+        """_write_cache creates cache directory if it does not exist."""
+        from browse import _write_cache
+
+        data = {"events": [], "total_raw": 0}
+
+        _write_cache("test_query", data)
+
+        mock_makedirs.assert_called_once()
+
+    @patch("browse.CACHE_DIR", "/tmp/test_cache")
+    @patch("browse.os.path.exists", return_value=True)
+    @patch("browse.os.path.getmtime", return_value=time.time())
+    @patch("builtins.open", side_effect=Exception("read error"))
+    def test_read_cache_returns_none_on_error(self, mock_open, mock_mtime, mock_exists):
+        """_read_cache returns None when an error occurs during cache read."""
+        from browse import _read_cache
+
+        result = _read_cache("test_query")
+
+        self.assertIsNone(result)
+
+    @patch("browse.CACHE_DIR", "/tmp/test_cache")
+    @patch("builtins.open", side_effect=Exception("write error"))
+    @patch("browse.os.makedirs")
+    def test_write_cache_returns_silently_on_error(self, mock_makedirs, mock_open):
+        """_write_cache silently handles errors and does not raise."""
+        from browse import _write_cache
+
+        data = {"events": [], "total_raw": 0}
+
+        try:
+            _write_cache("test_query", data)
+        except Exception:
+            self.fail("_write_cache raised an exception unexpectedly")
+
+
+class TestMaxTotalParameter(unittest.TestCase):
+    """Tests for max_total parameter in fetch_all_pages."""
+
+    @patch("browse._read_cache", return_value=None)
+    @patch("browse._fetch_page_with_index")
+    @patch("browse.fetch_page")
+    def test_max_total_limits_events_returned(
+        self, mock_fetch_page, mock_parallel_fetch, mock_cache
+    ):
+        """max_total=10 should return at most 10 events."""
+        from browse import fetch_all_pages
+
+        pages = []
+        for i in range(10):
+            pages.append(
+                (
+                    i + 1,
+                    {
+                        "events": [
+                            {
+                                "id": f"e{i + 1}",
+                                "title": f"Event {i + 1}",
+                                "markets": [],
+                            }
+                        ],
+                        "pagination": {"totalResults": 500, "hasMore": True},
+                    },
+                )
+            )
+        mock_fetch_page.return_value = pages[0][1]
+        mock_parallel_fetch.side_effect = pages
+
+        result = fetch_all_pages("test", max_total=10, use_cache=False)
+
+        self.assertEqual(len(result["events"]), 10)
+
+    @patch("browse._read_cache", return_value=None)
+    @patch("browse._fetch_page_with_index")
+    @patch("browse.fetch_page")
+    def test_max_total_with_matches_and_non_matches(
+        self, mock_fetch_page, mock_parallel_fetch, mock_cache
+    ):
+        """max_total works alongside matches_max and non_matches_max quotas."""
+        from browse import fetch_all_pages
+
+        page1 = {
+            "events": [
+                {
+                    "id": "m1",
+                    "title": "Match 1",
+                    "seriesSlug": "x",
+                    "gameId": "1",
+                    "markets": [],
+                },
+                {"id": "n1", "title": "Non-match 1", "markets": []},
+                {
+                    "id": "m2",
+                    "title": "Match 2",
+                    "seriesSlug": "x",
+                    "gameId": "2",
+                    "markets": [],
+                },
+            ],
+            "pagination": {"totalResults": 100, "hasMore": True},
+        }
+        mock_fetch_page.return_value = page1
+        mock_parallel_fetch.side_effect = [(1, page1)]
+
+        result = fetch_all_pages(
+            "test", matches_max=10, non_matches_max=10, max_total=2, use_cache=False
+        )
+
+        self.assertEqual(len(result["events"]), 2)
 
 
 class TestBrowseEvents(unittest.TestCase):
