@@ -10,14 +10,14 @@ import sys
 import os
 from datetime import datetime, timezone, timedelta
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'scripts'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 from browse import send_telegram_message
 
 
 class TestSendTelegramMessage(unittest.TestCase):
     """Tests for the module-level send_telegram_message function."""
 
-    @patch('browse.urlopen')
+    @patch("browse.urlopen")
     def test_send_success(self, mock_urlopen):
         """send_telegram_message returns message_id on success."""
         mock_resp = MagicMock()
@@ -30,10 +30,12 @@ class TestSendTelegramMessage(unittest.TestCase):
         mock_urlopen.assert_called_once()
         call_args = mock_urlopen.call_args
         req = call_args[0][0]
-        self.assertEqual(req.full_url, "https://api.telegram.org/bottest_token/sendMessage")
+        self.assertEqual(
+            req.full_url, "https://api.telegram.org/bottest_token/sendMessage"
+        )
         self.assertEqual(req.method, "POST")
 
-    @patch('browse.urlopen')
+    @patch("browse.urlopen")
     def test_send_api_error_raises_runtime_error(self, mock_urlopen):
         """send_telegram_message raises RuntimeError when Telegram API returns ok=false."""
         mock_resp = MagicMock()
@@ -44,58 +46,62 @@ class TestSendTelegramMessage(unittest.TestCase):
             send_telegram_message("test_token", "test_chat", "hello")
         self.assertIn("Telegram API error: Forbidden", str(ctx.exception))
 
-    @patch('browse.urlopen')
+    @patch("browse.urlopen")
     def test_send_invalid_token_raises_http_error(self, mock_urlopen):
         """send_telegram_message raises HTTPError on invalid token (404)."""
         from urllib.error import HTTPError
+
         mock_urlopen.side_effect = HTTPError(
             url="https://api.telegram.org/botINVALID/sendMessage",
             code=404,
             msg="Not Found",
             hdrs={},
-            fp=None
+            fp=None,
         )
 
         with self.assertRaises(HTTPError) as ctx:
             send_telegram_message("INVALID", "test_chat", "hello")
         self.assertEqual(ctx.exception.code, 404)
 
-    @patch('browse.urlopen')
+    @patch("browse.urlopen")
     def test_send_rate_limit_raises_http_error(self, mock_urlopen):
         """send_telegram_message raises HTTPError on rate limit (429)."""
         from urllib.error import HTTPError
+
         mock_urlopen.side_effect = HTTPError(
             url="https://api.telegram.org/bottest_token/sendMessage",
             code=429,
             msg="Too Many Requests",
             hdrs={},
-            fp=None
+            fp=None,
         )
 
         with self.assertRaises(HTTPError) as ctx:
             send_telegram_message("test_token", "test_chat", "hello")
         self.assertEqual(ctx.exception.code, 429)
 
-    @patch('browse.urlopen')
+    @patch("browse.urlopen")
     def test_send_network_error_raises_url_error(self, mock_urlopen):
         """send_telegram_message raises URLError on network failure."""
         from urllib.error import URLError
+
         mock_urlopen.side_effect = URLError("Connection refused")
 
         with self.assertRaises(URLError) as ctx:
             send_telegram_message("test_token", "test_chat", "hello")
         self.assertIn("Connection refused", str(ctx.exception))
 
-    @patch('browse.urlopen')
+    @patch("browse.urlopen")
     def test_send_timeout_raises_url_error(self, mock_urlopen):
         """send_telegram_message raises URLError on timeout."""
         from urllib.error import URLError
+
         mock_urlopen.side_effect = URLError("<urlopen error TimeoutError: timed out>")
 
         with self.assertRaises(URLError):
             send_telegram_message("test_token", "test_chat", "hello")
 
-    @patch('browse.urlopen')
+    @patch("browse.urlopen")
     def test_send_custom_timeout_used(self, mock_urlopen):
         """send_telegram_message respects custom timeout parameter."""
         mock_resp = MagicMock()
@@ -105,9 +111,9 @@ class TestSendTelegramMessage(unittest.TestCase):
         send_telegram_message("test_token", "test_chat", "hello", timeout=30)
 
         call_kwargs = mock_urlopen.call_args[1]
-        self.assertEqual(call_kwargs['timeout'], 30)
+        self.assertEqual(call_kwargs["timeout"], 30)
 
-    @patch('browse.urlopen')
+    @patch("browse.urlopen")
     def test_send_html_parsing_mode(self, mock_urlopen):
         """send_telegram_message sends with parse_mode=HTML."""
         mock_resp = MagicMock()
@@ -125,8 +131,10 @@ class TestSendTelegramMessage(unittest.TestCase):
 class TestHtmlInjection(unittest.TestCase):
     """Tests for HTML injection prevention in Telegram messages."""
 
-    @patch.dict('os.environ', {'TELEGRAM_BOT_TOKEN': 'test_token', 'CHAT_ID': 'test_chat'})
-    @patch('browse.send_telegram_message')
+    @patch.dict(
+        "os.environ", {"TELEGRAM_BOT_TOKEN": "test_token", "CHAT_ID": "test_chat"}
+    )
+    @patch("browse.send_telegram_message")
     def test_send_to_telegram_html_injection_in_match_title(self, mock_send_msg):
         """
         titles in match events are NOT escaped before inserting into HTML.
@@ -140,19 +148,22 @@ class TestHtmlInjection(unittest.TestCase):
             "title": "<script>alert('XSS')</script> - Team A vs Team B",
             "slug": "test-event",
             "startTime": "2027-03-26T12:00:00Z",
-            "markets": [{
-                "sportsMarketType": "moneyline",
-                "outcomes": '["Team A", "Team B"]',
-                "outcomePrices": "[0.55, 0.45]",
-                "bestBid": "0.54",
-                "bestAsk": "0.56",
-                "volume": 50000,
-                "acceptingOrders": True,
-                "closed": False,
-            }],
+            "markets": [
+                {
+                    "sportsMarketType": "moneyline",
+                    "outcomes": '["Team A", "Team B"]',
+                    "outcomePrices": "[0.55, 0.45]",
+                    "bestBid": "0.54",
+                    "bestAsk": "0.56",
+                    "volume": 50000,
+                    "acceptingOrders": True,
+                    "closed": False,
+                }
+            ],
         }
 
         from browse import send_to_telegram
+
         send_to_telegram([malicious_event], [], "Counter Strike")
 
         # Check what was passed to send_telegram_message
@@ -161,12 +172,17 @@ class TestHtmlInjection(unittest.TestCase):
 
         # AFTER FIX: <script> should be escaped as &lt;script&gt;
         # BEFORE FIX: raw <script> appears in text (vulnerable — test would fail here)
-        self.assertIn("&lt;script&gt;", sent_text,
-            "HTML injection still present — title may NOT be escaped")
+        self.assertIn(
+            "&lt;script&gt;",
+            sent_text,
+            "HTML injection still present — title may NOT be escaped",
+        )
         self.assertIn("&lt;/script&gt;", sent_text)
 
-    @patch.dict('os.environ', {'TELEGRAM_BOT_TOKEN': 'test_token', 'CHAT_ID': 'test_chat'})
-    @patch('browse.send_telegram_message')
+    @patch.dict(
+        "os.environ", {"TELEGRAM_BOT_TOKEN": "test_token", "CHAT_ID": "test_chat"}
+    )
+    @patch("browse.send_telegram_message")
     def test_send_to_telegram_ampersand_in_title(self, mock_send_msg):
         """
         Ampersands in titles should be escaped as &amp; when using HTML parse_mode.
@@ -179,27 +195,31 @@ class TestHtmlInjection(unittest.TestCase):
             "title": "Team A & Team B vs Team C",
             "slug": "amp-test",
             "startTime": "2027-03-26T12:00:00Z",
-            "markets": [{
-                "sportsMarketType": "moneyline",
-                "outcomes": '["Team A & Team B", "Team C"]',
-                "outcomePrices": "[0.50, 0.50]",
-                "bestBid": "0.49",
-                "bestAsk": "0.51",
-                "volume": 10000,
-                "acceptingOrders": True,
-                "closed": False,
-            }],
+            "markets": [
+                {
+                    "sportsMarketType": "moneyline",
+                    "outcomes": '["Team A & Team B", "Team C"]',
+                    "outcomePrices": "[0.50, 0.50]",
+                    "bestBid": "0.49",
+                    "bestAsk": "0.51",
+                    "volume": 10000,
+                    "acceptingOrders": True,
+                    "closed": False,
+                }
+            ],
         }
 
         from browse import send_to_telegram
+
         send_to_telegram([event_with_ampersand], [], "Dota 2")
 
         sent_text = mock_send_msg.call_args[0][2]
 
         # AFTER FIX: & should be escaped as &amp;
         # BEFORE FIX: raw & appears (vulnerable — test would fail here)
-        self.assertIn("&amp;", sent_text,
-            "Ampersand not escaped — title may NOT be escaped")
+        self.assertIn(
+            "&amp;", sent_text, "Ampersand not escaped — title may NOT be escaped"
+        )
 
 
 class TestTimeFunctions(unittest.TestCase):
@@ -215,20 +235,23 @@ class TestTimeFunctions(unittest.TestCase):
         return {"startTime": start_time}
 
     def _frozen_dt(self, year, month, day, hour, minute, second=0):
-        return datetime(year, month, day, hour, minute, second,
-                        tzinfo=timezone.utc)
+        return datetime(year, month, day, hour, minute, second, tzinfo=timezone.utc)
 
     def _mock_datetime(self, frozen):
         """Return a mock datetime class that freezes now() to the given datetime."""
+
         class MockDatetime:
             @staticmethod
             def now(tz=None):
                 if tz is None:
                     return frozen
                 return frozen.astimezone(tz)
+
             fromisoformat = staticmethod(datetime.fromisoformat)
+
             def __call__(self, *a, **k):
                 return datetime(*a, **k)
+
         return MockDatetime
 
     # === _get_time_data core tests ===
@@ -236,6 +259,7 @@ class TestTimeFunctions(unittest.TestCase):
     def test_get_time_data_tbd(self):
         """No startTime -> TBD/0urgency/abs TBD."""
         from browse import _get_time_data
+
         td = _get_time_data({})
         self.assertEqual(td["time_status"], "TBD")
         self.assertEqual(td["time_urgency"], 0)
@@ -244,8 +268,9 @@ class TestTimeFunctions(unittest.TestCase):
     def test_get_time_data_in_30m(self):
         """Starts in 30 minutes -> 'In 30m', urgency 3."""
         frozen = self._frozen_dt(2026, 3, 25, 12, 0, 0)
-        with patch('browse.datetime', self._mock_datetime(frozen)):
+        with patch("browse.datetime", self._mock_datetime(frozen)):
             from browse import _get_time_data
+
             td = _get_time_data(self._make_event("2026-03-25T12:30:00Z"))
             self.assertEqual(td["time_status"], "In 30m")
             self.assertEqual(td["time_urgency"], 3)
@@ -254,8 +279,9 @@ class TestTimeFunctions(unittest.TestCase):
     def test_get_time_data_in_6h(self):
         """Starts in 6 hours -> 'In 6h', urgency 2."""
         frozen = self._frozen_dt(2026, 3, 25, 12, 0, 0)
-        with patch('browse.datetime', self._mock_datetime(frozen)):
+        with patch("browse.datetime", self._mock_datetime(frozen)):
             from browse import _get_time_data
+
             td = _get_time_data(self._make_event("2026-03-25T18:00:00Z"))
             self.assertEqual(td["time_status"], "In 6h")
             self.assertEqual(td["time_urgency"], 2)
@@ -264,8 +290,9 @@ class TestTimeFunctions(unittest.TestCase):
     def test_get_time_data_in_2d(self):
         """Starts in 2 days -> 'In 2d', urgency 1."""
         frozen = self._frozen_dt(2026, 3, 25, 12, 0, 0)
-        with patch('browse.datetime', self._mock_datetime(frozen)):
+        with patch("browse.datetime", self._mock_datetime(frozen)):
             from browse import _get_time_data
+
             td = _get_time_data(self._make_event("2026-03-27T12:00:00Z"))
             self.assertEqual(td["time_status"], "In 2d")
             self.assertEqual(td["time_urgency"], 1)
@@ -273,8 +300,9 @@ class TestTimeFunctions(unittest.TestCase):
     def test_get_time_data_live(self):
         """Started 30 minutes ago -> 'LIVE', urgency 3."""
         frozen = self._frozen_dt(2026, 3, 25, 12, 30, 0)
-        with patch('browse.datetime', self._mock_datetime(frozen)):
+        with patch("browse.datetime", self._mock_datetime(frozen)):
             from browse import _get_time_data
+
             td = _get_time_data(self._make_event("2026-03-25T12:00:00Z"))
             self.assertEqual(td["time_status"], "LIVE")
             self.assertEqual(td["time_urgency"], 3)
@@ -283,8 +311,9 @@ class TestTimeFunctions(unittest.TestCase):
     def test_get_time_data_started_2h_ago(self):
         """Started 2 hours ago -> 'LIVE 2h', urgency 3."""
         frozen = self._frozen_dt(2026, 3, 25, 14, 0, 0)
-        with patch('browse.datetime', self._mock_datetime(frozen)):
+        with patch("browse.datetime", self._mock_datetime(frozen)):
             from browse import _get_time_data
+
             td = _get_time_data(self._make_event("2026-03-25T12:00:00Z"))
             self.assertEqual(td["time_status"], "LIVE 2h")
             self.assertEqual(td["time_urgency"], 3)
@@ -292,8 +321,9 @@ class TestTimeFunctions(unittest.TestCase):
     def test_get_time_data_started_12h_ago(self):
         """Started 12 hours ago -> '12h ago', urgency 1."""
         frozen = self._frozen_dt(2026, 3, 26, 0, 0, 0)
-        with patch('browse.datetime', self._mock_datetime(frozen)):
+        with patch("browse.datetime", self._mock_datetime(frozen)):
             from browse import _get_time_data
+
             td = _get_time_data(self._make_event("2026-03-25T12:00:00Z"))
             self.assertEqual(td["time_status"], "12h ago")
             self.assertEqual(td["time_urgency"], 1)
@@ -301,8 +331,9 @@ class TestTimeFunctions(unittest.TestCase):
     def test_get_time_data_started_2d_ago(self):
         """Started 2 days ago -> '2d ago', urgency 0."""
         frozen = self._frozen_dt(2026, 3, 27, 12, 0, 0)
-        with patch('browse.datetime', self._mock_datetime(frozen)):
+        with patch("browse.datetime", self._mock_datetime(frozen)):
             from browse import _get_time_data
+
             td = _get_time_data(self._make_event("2026-03-25T12:00:00Z"))
             self.assertEqual(td["time_status"], "2d ago")
             self.assertEqual(td["time_urgency"], 0)
@@ -310,8 +341,9 @@ class TestTimeFunctions(unittest.TestCase):
     def test_get_time_data_abs_time_format(self):
         """abs_time is formatted correctly in WIB."""
         frozen = self._frozen_dt(2026, 3, 25, 12, 0, 0)
-        with patch('browse.datetime', self._mock_datetime(frozen)):
+        with patch("browse.datetime", self._mock_datetime(frozen)):
             from browse import _get_time_data
+
             # 19:00 UTC = 02:00 WIB next day
             td = _get_time_data(self._make_event("2026-03-26T02:00:00Z"))
             self.assertIn("WIB", td["abs_time"])
@@ -324,8 +356,7 @@ class TestFormatMatchEvent(unittest.TestCase):
     """Tests for format_match_event() canonical dict."""
 
     def _frozen_dt(self, year, month, day, hour, minute):
-        return datetime(year, month, day, hour, minute,
-                        tzinfo=timezone.utc)
+        return datetime(year, month, day, hour, minute, tzinfo=timezone.utc)
 
     def _mock_datetime(self, frozen):
         class MockDatetime:
@@ -334,13 +365,17 @@ class TestFormatMatchEvent(unittest.TestCase):
                 if tz is None:
                     return frozen
                 return frozen.astimezone(tz)
+
             fromisoformat = staticmethod(datetime.fromisoformat)
+
             def __call__(self, *a, **k):
                 return datetime(*a, **k)
+
         return MockDatetime
 
     def _make_event(self, title, ml_market=None, start_time="2026-03-25T18:00:00Z"):
         import json as _json
+
         e = {
             "title": title,
             "slug": "test-slug",
@@ -353,6 +388,7 @@ class TestFormatMatchEvent(unittest.TestCase):
 
     def _make_ml_market(self, outcomes, prices, vol=50000):
         import json
+
         return {
             "sportsMarketType": "moneyline",
             "outcomes": json.dumps(outcomes),
@@ -367,8 +403,9 @@ class TestFormatMatchEvent(unittest.TestCase):
     def test_fields_present(self):
         """All canonical fields are present and non-null."""
         frozen = self._frozen_dt(2026, 3, 25, 12, 0)
-        with patch('browse.datetime', self._mock_datetime(frozen)):
+        with patch("browse.datetime", self._mock_datetime(frozen)):
             from browse import format_match_event
+
             e = self._make_event(
                 "Counter Strike: Team A vs Team B - ESL Pro League",
                 self._make_ml_market(['"Team A"', '"Team B"'], [0.55, 0.45]),
@@ -390,8 +427,9 @@ class TestFormatMatchEvent(unittest.TestCase):
     def test_title_clean_no_tournament(self):
         """title_clean strips tournament suffix after ' - '."""
         frozen = self._frozen_dt(2026, 3, 25, 12, 0)
-        with patch('browse.datetime', self._mock_datetime(frozen)):
+        with patch("browse.datetime", self._mock_datetime(frozen)):
             from browse import format_match_event
+
             e = self._make_event(
                 "Counter Strike: Team A vs Team B - ESL Pro League",
                 self._make_ml_market(['"Team A"', '"Team B"'], [0.55, 0.45]),
@@ -403,8 +441,9 @@ class TestFormatMatchEvent(unittest.TestCase):
     def test_title_clean_no_dash(self):
         """title_clean is unchanged when no ' - ' separator."""
         frozen = self._frozen_dt(2026, 3, 25, 12, 0)
-        with patch('browse.datetime', self._mock_datetime(frozen)):
+        with patch("browse.datetime", self._mock_datetime(frozen)):
             from browse import format_match_event
+
             e = self._make_event(
                 "Counter Strike: Team A vs Team B",
                 self._make_ml_market(['"Team A"', '"Team B"'], [0.55, 0.45]),
@@ -416,8 +455,9 @@ class TestFormatMatchEvent(unittest.TestCase):
     def test_missing_ml(self):
         """Returns valid dict with '?' fallbacks when no ML market."""
         frozen = self._frozen_dt(2026, 3, 25, 12, 0)
-        with patch('browse.datetime', self._mock_datetime(frozen)):
+        with patch("browse.datetime", self._mock_datetime(frozen)):
             from browse import format_match_event
+
             e = self._make_event("Team A vs Team B")
             fd = format_match_event(e)
             self.assertEqual(fd["team_a"], "?")
@@ -429,8 +469,9 @@ class TestFormatMatchEvent(unittest.TestCase):
     def test_missing_outcomes(self):
         """Handles empty outcomes list gracefully."""
         frozen = self._frozen_dt(2026, 3, 25, 12, 0)
-        with patch('browse.datetime', self._mock_datetime(frozen)):
+        with patch("browse.datetime", self._mock_datetime(frozen)):
             from browse import format_match_event
+
             e = self._make_event(
                 "Team A vs Team B",
                 self._make_ml_market([], []),
@@ -442,8 +483,9 @@ class TestFormatMatchEvent(unittest.TestCase):
     def test_time_data_passed_through(self):
         """Time fields come from _get_time_data."""
         frozen = self._frozen_dt(2026, 3, 25, 12, 0)
-        with patch('browse.datetime', self._mock_datetime(frozen)):
+        with patch("browse.datetime", self._mock_datetime(frozen)):
             from browse import format_match_event
+
             e = self._make_event(
                 "Team A vs Team B",
                 self._make_ml_market(['"Team A"', '"Team B"'], [0.55, 0.45]),
@@ -459,8 +501,7 @@ class TestFormatNonMatchEvent(unittest.TestCase):
     """Tests for format_non_match_event() canonical dict."""
 
     def _frozen_dt(self, year, month, day, hour, minute):
-        return datetime(year, month, day, hour, minute,
-                        tzinfo=timezone.utc)
+        return datetime(year, month, day, hour, minute, tzinfo=timezone.utc)
 
     def _mock_datetime(self, frozen):
         class MockDatetime:
@@ -469,16 +510,20 @@ class TestFormatNonMatchEvent(unittest.TestCase):
                 if tz is None:
                     return frozen
                 return frozen.astimezone(tz)
+
             fromisoformat = staticmethod(datetime.fromisoformat)
+
             def __call__(self, *a, **k):
                 return datetime(*a, **k)
+
         return MockDatetime
 
     def test_fields_present(self):
         """All canonical fields are present."""
         frozen = self._frozen_dt(2026, 3, 25, 12, 0)
-        with patch('browse.datetime', self._mock_datetime(frozen)):
+        with patch("browse.datetime", self._mock_datetime(frozen)):
             from browse import format_non_match_event
+
             e = {
                 "title": "Will it rain in Jakarta?",
                 "slug": "rain-jakarta",
@@ -500,8 +545,9 @@ class TestFormatNonMatchEvent(unittest.TestCase):
     def test_market_stats(self):
         """market_count and total_vol computed correctly."""
         frozen = self._frozen_dt(2026, 3, 25, 12, 0)
-        with patch('browse.datetime', self._mock_datetime(frozen)):
+        with patch("browse.datetime", self._mock_datetime(frozen)):
             from browse import format_non_match_event
+
             e = {
                 "title": "Test",
                 "slug": "test",
@@ -518,8 +564,9 @@ class TestFormatNonMatchEvent(unittest.TestCase):
     def test_time_passed_through(self):
         """Time fields come from _get_time_data."""
         frozen = self._frozen_dt(2026, 3, 25, 12, 0)
-        with patch('browse.datetime', self._mock_datetime(frozen)):
+        with patch("browse.datetime", self._mock_datetime(frozen)):
             from browse import format_non_match_event
+
             e = {
                 "title": "Test",
                 "slug": "test",
@@ -536,6 +583,7 @@ class TestRenderMatchLines(unittest.TestCase):
     def test_text_mode_exact_lines(self):
         """text mode produces expected plain text lines."""
         from browse import render_match_lines
+
         fd = {
             "title_clean": "Team A vs Team B",
             "url": "https://polymarket.com/market/test",
@@ -549,7 +597,9 @@ class TestRenderMatchLines(unittest.TestCase):
             "odds_b": "45c",
         }
         lines = render_match_lines(fd, 1, mode="text")
-        self.assertEqual(lines[0], "1. [Team A vs Team B](https://polymarket.com/market/test)")
+        self.assertEqual(
+            lines[0], "1. [Team A vs Team B](https://polymarket.com/market/test)"
+        )
         self.assertEqual(lines[1], "   Mar 25, 19:00 WIB | In 6h")
         self.assertEqual(lines[2], "  Vol: $50,000")
         self.assertEqual(lines[3], "  Tournament: ESL Pro League")
@@ -558,6 +608,7 @@ class TestRenderMatchLines(unittest.TestCase):
     def test_text_mode_no_tournament(self):
         """text mode omits Tournament line when tournament is empty."""
         from browse import render_match_lines
+
         fd = {
             "title_clean": "Team A vs Team B",
             "url": "https://polymarket.com/market/test",
@@ -572,12 +623,15 @@ class TestRenderMatchLines(unittest.TestCase):
         }
         lines = render_match_lines(fd, 2, mode="text")
         self.assertEqual(len(lines), 4)
-        self.assertEqual(lines[0], "2. [Team A vs Team B](https://polymarket.com/market/test)")
+        self.assertEqual(
+            lines[0], "2. [Team A vs Team B](https://polymarket.com/market/test)"
+        )
         self.assertNotIn("Tournament", lines[3])
 
     def test_html_mode_exact(self):
         """html mode produces expected HTML lines with escape_html."""
         from browse import render_match_lines
+
         fd = {
             "title_clean": "Team A & Team B vs Team C",
             "url": "https://polymarket.com/market/test",
@@ -591,7 +645,10 @@ class TestRenderMatchLines(unittest.TestCase):
             "odds_b": "45c",
         }
         lines = render_match_lines(fd, 1, mode="html")
-        self.assertEqual(lines[0], "<b>1.</b> <a href=\"https://polymarket.com/market/test\">Team A &amp; Team B vs Team C</a>")
+        self.assertEqual(
+            lines[0],
+            '<b>1.</b> <a href="https://polymarket.com/market/test">Team A &amp; Team B vs Team C</a>',
+        )
         self.assertEqual(lines[1], "   Mar 25, 19:00 WIB | LIVE")
         self.assertEqual(lines[2], "  Vol: $50,000")
         self.assertEqual(lines[3], "  Tournament: ESL Pro League")
@@ -600,6 +657,7 @@ class TestRenderMatchLines(unittest.TestCase):
     def test_html_mode_xss_prevention(self):
         """html mode escapes < and > to prevent XSS."""
         from browse import render_match_lines
+
         fd = {
             "title_clean": "<script>alert('xss')</script>",
             "url": "https://polymarket.com/market/test",
@@ -623,6 +681,7 @@ class TestRenderNonMatchLines(unittest.TestCase):
     def test_text_mode_exact_lines(self):
         """text mode produces expected plain text lines."""
         from browse import render_non_match_lines
+
         fd = {
             "title": "Will it rain in Jakarta?",
             "url": "https://polymarket.com/event/rain-jakarta",
@@ -632,13 +691,17 @@ class TestRenderNonMatchLines(unittest.TestCase):
             "total_vol": 25000,
         }
         lines = render_non_match_lines(fd, 1, mode="text")
-        self.assertEqual(lines[0], "1. [Will it rain in Jakarta?](https://polymarket.com/event/rain-jakarta)")
+        self.assertEqual(
+            lines[0],
+            "1. [Will it rain in Jakarta?](https://polymarket.com/event/rain-jakarta)",
+        )
         self.assertEqual(lines[1], "   Mar 25, 19:00 WIB | In 6h")
         self.assertEqual(lines[2], "   Markets: 3 | Total Vol: $25,000")
 
     def test_html_mode_exact(self):
         """html mode produces expected HTML lines with escape_html."""
         from browse import render_non_match_lines
+
         fd = {
             "title": "Rain <or> Sun?",
             "url": "https://polymarket.com/event/rain-sun",
@@ -648,7 +711,10 @@ class TestRenderNonMatchLines(unittest.TestCase):
             "total_vol": 10000,
         }
         lines = render_non_match_lines(fd, 1, mode="html")
-        self.assertEqual(lines[0], "<b>1.</b> <a href=\"https://polymarket.com/event/rain-sun\">Rain &lt;or&gt; Sun?</a>")
+        self.assertEqual(
+            lines[0],
+            '<b>1.</b> <a href="https://polymarket.com/event/rain-sun">Rain &lt;or&gt; Sun?</a>',
+        )
         self.assertEqual(lines[1], "   Mar 25, 19:00 WIB | In 6h")
         self.assertEqual(lines[2], "   Markets: 2 | Total Vol: $10,000")
 
@@ -657,8 +723,7 @@ class TestPrintBrowseIntegration(unittest.TestCase):
     """Integration tests for print_browse using the new pipeline."""
 
     def _frozen_dt(self, year, month, day, hour, minute):
-        return datetime(year, month, day, hour, minute,
-                        tzinfo=timezone.utc)
+        return datetime(year, month, day, hour, minute, tzinfo=timezone.utc)
 
     def _mock_datetime(self, frozen):
         class MockDatetime:
@@ -667,34 +732,44 @@ class TestPrintBrowseIntegration(unittest.TestCase):
                 if tz is None:
                     return frozen
                 return frozen.astimezone(tz)
+
             fromisoformat = staticmethod(datetime.fromisoformat)
+
             def __call__(self, *a, **k):
                 return datetime(*a, **k)
+
         return MockDatetime
 
-    @patch('builtins.print')
+    @patch("builtins.print")
     def test_print_browse_uses_new_pipeline(self, mock_print):
         """print_browse calls format_match_event and render_match_lines."""
         frozen = self._frozen_dt(2026, 3, 25, 12, 0)
-        with patch('browse.datetime', self._mock_datetime(frozen)):
+        with patch("browse.datetime", self._mock_datetime(frozen)):
             from browse import print_browse
-            match_events = [{
-                "title": "Counter Strike: Team A vs Team B - ESL Pro League",
-                "slug": "csa",
-                "startTime": "2026-03-25T18:00:00Z",
-                "markets": [{
-                    "sportsMarketType": "moneyline",
-                    "outcomes": '["Team A", "Team B"]',
-                    "outcomePrices": "[0.55, 0.45]",
-                    "bestBid": "0.54",
-                    "bestAsk": "0.56",
-                    "volume": "50000",
-                    "acceptingOrders": True,
-                    "closed": False,
-                }],
-            }]
-            with patch('browse.format_match_event') as mock_fmt, \
-                 patch('browse.render_match_lines') as mock_render:
+
+            match_events = [
+                {
+                    "title": "Counter Strike: Team A vs Team B - ESL Pro League",
+                    "slug": "csa",
+                    "startTime": "2026-03-25T18:00:00Z",
+                    "markets": [
+                        {
+                            "sportsMarketType": "moneyline",
+                            "outcomes": '["Team A", "Team B"]',
+                            "outcomePrices": "[0.55, 0.45]",
+                            "bestBid": "0.54",
+                            "bestAsk": "0.56",
+                            "volume": "50000",
+                            "acceptingOrders": True,
+                            "closed": False,
+                        }
+                    ],
+                }
+            ]
+            with (
+                patch("browse.format_match_event") as mock_fmt,
+                patch("browse.render_match_lines") as mock_render,
+            ):
                 mock_fmt.return_value = {
                     "title_clean": "Team A vs Team B",
                     "url": "https://polymarket.com/market/csa",
@@ -714,21 +789,34 @@ class TestPrintBrowseIntegration(unittest.TestCase):
                     "  Tournament: ESL Pro League",
                     "  Odds: Team A 55c | 45c Team B",
                 ]
-                print_browse(match_events, [], "Counter Strike", 1, 1, 1, 0,
-                             non_matches_max=5)
+                print_browse(
+                    match_events, [], "Counter Strike", 1, 1, 1, 0, non_matches_max=5
+                )
 
                 mock_fmt.assert_called_once_with(match_events[0])
-                mock_render.assert_called_once_with(mock_fmt.return_value, 1, mode="text")
+                mock_render.assert_called_once_with(
+                    mock_fmt.return_value, 1, mode="text"
+                )
 
-    @patch('builtins.print')
+    @patch("builtins.print")
     def test_print_browse_matches_only(self, mock_print):
         """matches_only suppresses non-match section."""
         frozen = self._frozen_dt(2026, 3, 25, 12, 0)
-        with patch('browse.datetime', self._mock_datetime(frozen)):
+        with patch("browse.datetime", self._mock_datetime(frozen)):
             from browse import print_browse
-            with patch('browse.format_non_match_event') as mock_non_fmt:
-                print_browse([], [], "Counter Strike", 0, 0, 0, 0,
-                             non_matches_max=5, matches_only=True)
+
+            with patch("browse.format_non_match_event") as mock_non_fmt:
+                print_browse(
+                    [],
+                    [],
+                    "Counter Strike",
+                    0,
+                    0,
+                    0,
+                    0,
+                    non_matches_max=5,
+                    matches_only=True,
+                )
                 mock_non_fmt.assert_not_called()
 
 
@@ -738,19 +826,34 @@ class TestSendChunked(unittest.TestCase):
     def test_small_message_sent_directly(self):
         """Messages under 4096 chars go through without chunking."""
         sent_texts = []
+
         def fake_send(text):
             sent_texts.append(text)
 
-        lines = ["<b>COUNTER STRIKE</b> | Mar 25, 2026", "", "MATCH MARKETS", "", "1. test"]
+        lines = [
+            "<b>COUNTER STRIKE</b> | Mar 25, 2026",
+            "",
+            "MATCH MARKETS",
+            "",
+            "1. test",
+        ]
         # This fits in one message
         from browse import send_chunked
-        send_chunked(lines, fake_send, "Counter Strike", "Mar 25, 2026",
-                      show_matches=True, show_non_matches=False)
+
+        send_chunked(
+            lines,
+            fake_send,
+            "Counter Strike",
+            "Mar 25, 2026",
+            show_matches=True,
+            show_non_matches=False,
+        )
         self.assertEqual(len(sent_texts), 1)
 
     def test_chunked_message_gets_cont_header(self):
         """Messages over 4096 chars get continuation header."""
         sent_texts = []
+
         def fake_send(text):
             sent_texts.append(text)
 
@@ -758,18 +861,34 @@ class TestSendChunked(unittest.TestCase):
         # Each event line: ~260 chars. Need ~16 events + headers (~4200 chars)
         lines = ["<b>COUNTER STRIKE</b> | Mar 25, 2026", ""]
         for i in range(16):
-            lines += [f"<b>{i+1}.</b> <a href=\"https://polymarket.com/market/{i}\">Team {'X' * 250}</a>", "   Mar 25, 19:00 WIB | In 6h", "  Vol: $50,000", "  Odds: TeamA 55c | 45c TeamB", ""]
+            lines += [
+                f'<b>{i + 1}.</b> <a href="https://polymarket.com/market/{i}">Team {"X" * 250}</a>',
+                "   Mar 25, 19:00 WIB | In 6h",
+                "  Vol: $50,000",
+                "  Odds: TeamA 55c | 45c TeamB",
+                "",
+            ]
         lines.append("")
 
         from browse import send_chunked
-        send_chunked(lines, fake_send, "Counter Strike", "Mar 25, 2026",
-                      show_matches=True, show_non_matches=False)
+
+        send_chunked(
+            lines,
+            fake_send,
+            "Counter Strike",
+            "Mar 25, 2026",
+            show_matches=True,
+            show_non_matches=False,
+        )
 
         # Should have sent more than one message (chunked)
         self.assertGreater(len(sent_texts), 1)
         # At least one continuation message
         cont_found = any("(cont.)" in t for t in sent_texts)
-        self.assertTrue(cont_found, f"Expected at least one '(cont.)' message. Got {len(sent_texts)} messages.")
+        self.assertTrue(
+            cont_found,
+            f"Expected at least one '(cont.)' message. Got {len(sent_texts)} messages.",
+        )
 
 
 class TestIsMatchMarket(unittest.TestCase):
@@ -778,30 +897,39 @@ class TestIsMatchMarket(unittest.TestCase):
     def test_match_when_series_and_gameid(self):
         """seriesSlug + gameId present -> match market."""
         from browse import is_match_market
-        e = {"seriesSlug": "esl-pro-league", "gameId": "12345", "title": "Tournament Winner"}
+
+        e = {
+            "seriesSlug": "esl-pro-league",
+            "gameId": "12345",
+            "title": "Tournament Winner",
+        }
         self.assertTrue(is_match_market(e))
 
     def test_match_when_vs_in_title(self):
         """' vs ' in title -> match market."""
         from browse import is_match_market
+
         e = {"title": "Team A vs Team B - Final"}
         self.assertTrue(is_match_market(e))
 
     def test_non_match_without_series_and_gameid(self):
         """No seriesSlug/gameId and no ' vs ' -> non-match."""
         from browse import is_match_market
+
         e = {"title": "Will Team A win the tournament?"}
         self.assertFalse(is_match_market(e))
 
     def test_non_match_seriesSlug_only(self):
         """Only seriesSlug (no gameId) -> non-match."""
         from browse import is_match_market
+
         e = {"seriesSlug": "esl-pro-league", "title": "Tournament Winner"}
         self.assertFalse(is_match_market(e))
 
     def test_non_match_gameid_only(self):
         """Only gameId (no seriesSlug) -> non-match."""
         from browse import is_match_market
+
         e = {"gameId": "12345", "title": "Tournament Winner"}
         self.assertFalse(is_match_market(e))
 
@@ -812,6 +940,7 @@ class TestGetMlMarket(unittest.TestCase):
     def test_get_ml_market_finds_moneyline(self):
         """Finds and returns the moneyline market."""
         from browse import get_ml_market
+
         e = {
             "markets": [
                 {"sportsMarketType": "spread", "volume": "1000"},
@@ -826,28 +955,28 @@ class TestGetMlMarket(unittest.TestCase):
     def test_get_ml_market_returns_none_when_missing(self):
         """Returns None when no moneyline market exists."""
         from browse import get_ml_market
+
         e = {"markets": [{"sportsMarketType": "spread", "volume": "1000"}]}
         self.assertIsNone(get_ml_market(e))
 
     def test_get_ml_market_returns_none_when_no_markets(self):
         """Returns None when event has no markets."""
         from browse import get_ml_market
+
         e = {}
         self.assertIsNone(get_ml_market(e))
 
     def test_get_ml_volume_with_ml(self):
         """Returns float volume from moneyline market."""
         from browse import get_ml_volume
-        e = {
-            "markets": [
-                {"sportsMarketType": "moneyline", "volume": "123456"}
-            ]
-        }
+
+        e = {"markets": [{"sportsMarketType": "moneyline", "volume": "123456"}]}
         self.assertEqual(get_ml_volume(e), 123456.0)
 
     def test_get_ml_volume_no_ml(self):
         """Returns 0.0 when no moneyline market."""
         from browse import get_ml_volume
+
         e = {"markets": []}
         self.assertEqual(get_ml_volume(e), 0.0)
 
@@ -861,33 +990,38 @@ class TestFilterEvents(unittest.TestCase):
             "title": f"Team A vs Team B - Match {match_id}",
             "seriesSlug": "test-league",
             "gameId": str(match_id),
-            "markets": [{
-                "sportsMarketType": "moneyline",
-                "volume": vol,
-                "bestBid": "0.50",
-                "bestAsk": "0.52",
-                "acceptingOrders": tradeable,
-                "closed": False,
-            }],
+            "markets": [
+                {
+                    "sportsMarketType": "moneyline",
+                    "volume": vol,
+                    "bestBid": "0.50",
+                    "bestAsk": "0.52",
+                    "acceptingOrders": tradeable,
+                    "closed": False,
+                }
+            ],
         }
 
     def _make_non_match(self, event_id, tradeable=True):
         return {
             "id": f"nm{event_id}",
             "title": f"Will event {event_id} happen?",
-            "markets": [{
-                "sportsMarketType": "moneyline",
-                "volume": "10000",
-                "bestBid": "0.50",
-                "bestAsk": "0.52",
-                "acceptingOrders": tradeable,
-                "closed": False,
-            }],
+            "markets": [
+                {
+                    "sportsMarketType": "moneyline",
+                    "volume": "10000",
+                    "bestBid": "0.50",
+                    "bestAsk": "0.52",
+                    "acceptingOrders": tradeable,
+                    "closed": False,
+                }
+            ],
         }
 
     def test_filter_events_splits_match_and_non_match(self):
         """Correctly splits events into match and non-match buckets."""
         from browse import filter_events
+
         events = [
             self._make_match(1),
             self._make_non_match(1),
@@ -903,6 +1037,7 @@ class TestFilterEvents(unittest.TestCase):
     def test_filter_events_tradeable_only(self):
         """tradeable_only=True filters out non-tradeable events."""
         from browse import filter_events
+
         events = [
             self._make_match(1, tradeable=True),
             self._make_match(2, tradeable=False),
@@ -911,11 +1046,14 @@ class TestFilterEvents(unittest.TestCase):
         matches, non_matches = filter_events(events, tradeable_only=True)
         self.assertEqual(len(matches), 1)
         self.assertEqual(matches[0]["id"], "1")
-        self.assertEqual(len(non_matches), 1)  # non-match with acceptingOrders=True passes
+        self.assertEqual(
+            len(non_matches), 1
+        )  # non-match with acceptingOrders=True passes
 
     def test_filter_events_tradeable_only_false(self):
         """tradeable_only=False keeps all events."""
         from browse import filter_events
+
         events = [
             self._make_match(1, tradeable=True),
             self._make_match(2, tradeable=False),
@@ -929,19 +1067,21 @@ class TestFilterEvents(unittest.TestCase):
     def test_sort_events_by_volume_desc(self):
         """sort_events returns events sorted by volume descending."""
         from browse import sort_events
+
         events = [
             self._make_match(1, vol="10000"),
             self._make_match(2, vol="50000"),
             self._make_match(3, vol="30000"),
         ]
         sorted_evts = sort_events(events)
-        self.assertEqual(sorted_evts[0]["id"], "2")   # vol=50000
-        self.assertEqual(sorted_evts[1]["id"], "3")   # vol=30000
-        self.assertEqual(sorted_evts[2]["id"], "1")   # vol=10000
+        self.assertEqual(sorted_evts[0]["id"], "2")  # vol=50000
+        self.assertEqual(sorted_evts[1]["id"], "3")  # vol=30000
+        self.assertEqual(sorted_evts[2]["id"], "1")  # vol=10000
 
     def test_sort_events_empty_list(self):
         """sort_events handles empty list gracefully."""
         from browse import sort_events
+
         result = sort_events([])
         self.assertEqual(result, [])
 
@@ -949,152 +1089,199 @@ class TestFilterEvents(unittest.TestCase):
 class TestFetchAllPages(unittest.TestCase):
     """Tests for fetch_all_pages() early-exit logic."""
 
-    @patch('browse.fetch_page')
-    @patch('browse.time.sleep')
-    def test_early_exit_stops_when_both_quotas_met(self, mock_sleep, mock_fetch_page):
+    @patch("browse._read_cache", return_value=None)
+    @patch("browse._fetch_page_with_index")
+    @patch("browse.fetch_page")
+    def test_early_exit_stops_when_both_quotas_met(
+        self, mock_fetch_page, mock_parallel_fetch, mock_cache
+    ):
         """Stops fetching once both match and non-match quotas are satisfied."""
         from browse import fetch_all_pages
 
-        # Page 1: 2 matches, 2 non-matches (neither quota met)
         page1 = {
             "events": [
-                {"id": "m1", "title": "Match 1", "seriesSlug": "x", "gameId": "1", "markets": []},
-                {"id": "m2", "title": "Match 2", "seriesSlug": "x", "gameId": "2", "markets": []},
+                {
+                    "id": "m1",
+                    "title": "Match 1",
+                    "seriesSlug": "x",
+                    "gameId": "1",
+                    "markets": [],
+                },
+                {
+                    "id": "m2",
+                    "title": "Match 2",
+                    "seriesSlug": "x",
+                    "gameId": "2",
+                    "markets": [],
+                },
                 {"id": "n1", "title": "Non-match 1", "markets": []},
                 {"id": "n2", "title": "Non-match 2", "markets": []},
             ],
-            "pagination": {"totalResults": 10, "hasMore": True}
+            "pagination": {"totalResults": 200, "hasMore": True},
         }
-        # Page 2: 1 match, 1 non-match (both quotas met: 3 matches >= 3, 3 non-matches >= 3)
         page2 = {
             "events": [
-                {"id": "m3", "title": "Match 3", "seriesSlug": "x", "gameId": "3", "markets": []},
+                {
+                    "id": "m3",
+                    "title": "Match 3",
+                    "seriesSlug": "x",
+                    "gameId": "3",
+                    "markets": [],
+                },
                 {"id": "n3", "title": "Non-match 3", "markets": []},
-                {"id": "m4", "title": "Match 4", "seriesSlug": "x", "gameId": "4", "markets": []},
-                {"id": "n4", "title": "Non-match 4", "markets": []},
             ],
-            "pagination": {"totalResults": 10, "hasMore": True}
+            "pagination": {"totalResults": 200, "hasMore": True},
+        }
+        page3 = {
+            "events": [],
+            "pagination": {"totalResults": 200, "hasMore": True},
+        }
+        page4 = {
+            "events": [],
+            "pagination": {"totalResults": 200, "hasMore": True},
         }
 
-        mock_fetch_page.side_effect = [page1, page2]  # should NOT reach page 2
+        mock_fetch_page.return_value = page1
+        mock_parallel_fetch.side_effect = [
+            (1, page1),
+            (2, page2),
+            (3, page3),
+            (4, page4),
+        ]
 
-        result = fetch_all_pages("test", matches_max=3, non_matches_max=3)
+        result = fetch_all_pages(
+            "test", matches_max=3, non_matches_max=3, use_cache=False
+        )
 
-        # Should stop after page 1 (quota met: 2 matches < 3? NO wait)
-        # Let me recount: page1 has 2 matches + 2 non-matches. Quota is 3+3. Not met.
-        # But page2 would be the same... let me think again.
-        # Actually the test above is: page1 = 2+2=4 items, page2 = 2+2=4 items
-        # Quotas: matches_max=3, non_matches_max=3
-        # After page1: match_count=2, non_match_count=2. Neither quota met.
-        # After page2: match_count=4, non_match_count=4. Both >= quota. Stop.
-        # So should call page1 and page2 only.
-        self.assertEqual(mock_fetch_page.call_count, 2)
+        self.assertEqual(mock_fetch_page.call_count, 1)
+        self.assertEqual(mock_parallel_fetch.call_count, 4)
+        self.assertEqual(len(result["events"]), 6)
 
-    @patch('browse.fetch_page')
-    @patch('browse.time.sleep')
-    def test_no_quota_fetches_all_pages(self, mock_sleep, mock_fetch_page):
+    @patch("browse._read_cache", return_value=None)
+    @patch("browse._fetch_page_with_index")
+    @patch("browse.fetch_page")
+    def test_no_quota_fetches_all_pages(
+        self, mock_fetch_page, mock_parallel_fetch, mock_cache
+    ):
         """Without quotas, fetches all pages until pagination ends."""
         from browse import fetch_all_pages
 
         page1 = {
             "events": [{"id": "e1", "title": "Event 1", "markets": []}],
-            "pagination": {"totalResults": 3, "hasMore": True}
+            "pagination": {"totalResults": 150, "hasMore": True},
         }
         page2 = {
             "events": [{"id": "e2", "title": "Event 2", "markets": []}],
-            "pagination": {"totalResults": 3, "hasMore": True}
+            "pagination": {"totalResults": 150, "hasMore": True},
         }
         page3 = {
             "events": [{"id": "e3", "title": "Event 3", "markets": []}],
-            "pagination": {"totalResults": 3, "hasMore": False}
-        }
-
-        mock_fetch_page.side_effect = [page1, page2, page3]
-
-        result = fetch_all_pages("test")
-
-        self.assertEqual(mock_fetch_page.call_count, 3)
-        self.assertEqual(len(result["events"]), 3)
-        self.assertFalse(result["partial"])
-
-    @patch('browse.fetch_page')
-    @patch('browse.time.sleep')
-    def test_early_exit_partial_true_when_stopped_early(self, mock_sleep, mock_fetch_page):
-        """Returns partial=True when stopped early due to quota."""
-        from browse import fetch_all_pages
-
-        page1 = {
-            "events": [
-                {"id": "m1", "title": "Match 1", "seriesSlug": "x", "gameId": "1", "markets": []},
-                {"id": "m2", "title": "Match 2", "seriesSlug": "x", "gameId": "2", "markets": []},
-                {"id": "m3", "title": "Match 3", "seriesSlug": "x", "gameId": "3", "markets": []},
-            ],
-            "pagination": {"totalResults": 100, "hasMore": True}
+            "pagination": {"totalResults": 150, "hasMore": False},
         }
 
         mock_fetch_page.return_value = page1
+        mock_parallel_fetch.side_effect = [(1, page1), (2, page2), (3, page3)]
 
-        result = fetch_all_pages("test", matches_max=3, non_matches_max=3)
+        result = fetch_all_pages("test", use_cache=False)
 
-        # After page1: match_count=3 >= 3, non_match_count=0 < 3. Non-match quota NOT met.
-        # So should continue to page2...
-        # Let me make a better test: page1 has 3 matches and 3 non-matches (both quotas met)
-        # But they need to be is_match_market -> need seriesSlug+gameId OR " vs "
-        # Actually the early exit checks match_count >= matches_max AND non_match_count >= non_matches_max
-        # So we need both to be met.
-        pass  # test needs fixing, let me redo
+        self.assertEqual(mock_fetch_page.call_count, 1)
+        self.assertEqual(mock_parallel_fetch.call_count, 3)
+        self.assertEqual(len(result["events"]), 3)
+        self.assertTrue(result["partial"])
 
-    @patch('browse.fetch_page')
-    @patch('browse.time.sleep')
-    def test_quota_one_side_only_keeps_fetching(self, mock_sleep, mock_fetch_page):
+    @patch("browse._read_cache", return_value=None)
+    @patch("browse._fetch_page_with_index")
+    @patch("browse.fetch_page")
+    def test_quota_one_side_only_keeps_fetching(
+        self, mock_fetch_page, mock_parallel_fetch, mock_cache
+    ):
         """If only one quota is met, keeps fetching."""
         from browse import fetch_all_pages
 
-        # Page 1: 3 matches, 0 non-matches (matches quota met, non_matches NOT met)
         page1 = {
             "events": [
-                {"id": "m1", "title": "Match 1", "seriesSlug": "x", "gameId": "1", "markets": []},
-                {"id": "m2", "title": "Match 2", "seriesSlug": "x", "gameId": "2", "markets": []},
-                {"id": "m3", "title": "Match 3", "seriesSlug": "x", "gameId": "3", "markets": []},
+                {
+                    "id": "m1",
+                    "title": "Match 1",
+                    "seriesSlug": "x",
+                    "gameId": "1",
+                    "markets": [],
+                },
+                {
+                    "id": "m2",
+                    "title": "Match 2",
+                    "seriesSlug": "x",
+                    "gameId": "2",
+                    "markets": [],
+                },
+                {
+                    "id": "m3",
+                    "title": "Match 3",
+                    "seriesSlug": "x",
+                    "gameId": "3",
+                    "markets": [],
+                },
             ],
-            "pagination": {"totalResults": 10, "hasMore": True}
+            "pagination": {"totalResults": 200, "hasMore": True},
         }
-        # Page 2: 0 matches, 3 non-matches (now both quotas met)
         page2 = {
             "events": [
                 {"id": "n1", "title": "Non-match 1", "markets": []},
                 {"id": "n2", "title": "Non-match 2", "markets": []},
                 {"id": "n3", "title": "Non-match 3", "markets": []},
             ],
-            "pagination": {"totalResults": 10, "hasMore": True}
+            "pagination": {"totalResults": 200, "hasMore": True},
+        }
+        page3 = {
+            "events": [],
+            "pagination": {"totalResults": 200, "hasMore": True},
+        }
+        page4 = {
+            "events": [],
+            "pagination": {"totalResults": 200, "hasMore": True},
         }
 
-        mock_fetch_page.side_effect = [page1, page2]
+        mock_fetch_page.return_value = page1
+        mock_parallel_fetch.side_effect = [
+            (1, page1),
+            (2, page2),
+            (3, page3),
+            (4, page4),
+        ]
 
-        result = fetch_all_pages("test", matches_max=3, non_matches_max=3)
+        result = fetch_all_pages(
+            "test", matches_max=3, non_matches_max=3, use_cache=False
+        )
 
-        self.assertEqual(mock_fetch_page.call_count, 2)
+        self.assertEqual(mock_parallel_fetch.call_count, 4)
         self.assertEqual(len(result["events"]), 6)
 
 
 class TestBrowseEvents(unittest.TestCase):
     """Tests for browse_events() with sort_by parameter."""
 
-    @patch('browse.fetch_all_pages')
+    @patch("browse.fetch_all_pages")
     def test_browse_events_early_exit_sort_by_none(self, mock_fetch):
         """sort_by=None uses early-exit: passes quotas to fetch_all_pages."""
         from browse import browse_events
 
         mock_fetch.return_value = {
             "events": [
-                {"id": "m1", "title": "Match 1", "seriesSlug": "x", "gameId": "1",
-                 "markets": [{"sportsMarketType": "moneyline", "volume": "50000"}]},
+                {
+                    "id": "m1",
+                    "title": "Match 1",
+                    "seriesSlug": "x",
+                    "gameId": "1",
+                    "markets": [{"sportsMarketType": "moneyline", "volume": "50000"}],
+                },
             ],
             "total_raw": 1,
             "partial": False,
         }
 
-        result = browse_events("test query", matches_max=5, non_matches_max=5, sort_by=None)
+        result = browse_events(
+            "test query", matches_max=5, non_matches_max=5, sort_by=None
+        )
 
         # Should pass quotas to fetch_all_pages for early-exit
         mock_fetch.assert_called_once()
@@ -1102,75 +1289,149 @@ class TestBrowseEvents(unittest.TestCase):
         self.assertEqual(call_kwargs[1]["matches_max"], 5)
         self.assertEqual(call_kwargs[1]["non_matches_max"], 5)
 
-    @patch('browse.fetch_all_pages')
+    @patch("browse.fetch_all_pages")
     def test_browse_events_volume_sort_full_fetch(self, mock_fetch):
         """sort_by='volume' does full fetch (no quotas passed)."""
         from browse import browse_events
 
         mock_fetch.return_value = {
             "events": [
-                {"id": "m1", "title": "Match 1", "seriesSlug": "x", "gameId": "1",
-                 "markets": [{"sportsMarketType": "moneyline", "volume": "10000"}]},
-                {"id": "m2", "title": "Match 2", "seriesSlug": "x", "gameId": "2",
-                 "markets": [{"sportsMarketType": "moneyline", "volume": "50000"}]},
+                {
+                    "id": "m1",
+                    "title": "Match 1",
+                    "seriesSlug": "x",
+                    "gameId": "1",
+                    "markets": [{"sportsMarketType": "moneyline", "volume": "10000"}],
+                },
+                {
+                    "id": "m2",
+                    "title": "Match 2",
+                    "seriesSlug": "x",
+                    "gameId": "2",
+                    "markets": [{"sportsMarketType": "moneyline", "volume": "50000"}],
+                },
             ],
             "total_raw": 2,
             "partial": False,
         }
 
-        result = browse_events("test query", matches_max=5, non_matches_max=5, sort_by="volume")
+        result = browse_events(
+            "test query", matches_max=5, non_matches_max=5, sort_by="volume"
+        )
 
         # Should pass None quotas to fetch_all_pages (full fetch)
         call_kwargs = mock_fetch.call_args
         self.assertIsNone(call_kwargs[1]["matches_max"])
         self.assertIsNone(call_kwargs[1]["non_matches_max"])
 
-    @patch('browse.fetch_all_pages')
+    @patch("browse.fetch_all_pages")
     def test_browse_events_volume_sort_sorts_by_volume(self, mock_fetch):
         """sort_by='volume' sorts match events by volume descending."""
         from browse import browse_events
 
         mock_fetch.return_value = {
             "events": [
-                {"id": "m1", "title": "Match Low", "seriesSlug": "x", "gameId": "1",
-                 "markets": [{"sportsMarketType": "moneyline", "volume": "10000",
-                              "bestBid": "0.50", "bestAsk": "0.52",
-                              "acceptingOrders": True, "closed": False}]},
-                {"id": "m2", "title": "Match High", "seriesSlug": "x", "gameId": "2",
-                 "markets": [{"sportsMarketType": "moneyline", "volume": "90000",
-                              "bestBid": "0.50", "bestAsk": "0.52",
-                              "acceptingOrders": True, "closed": False}]},
-                {"id": "m3", "title": "Match Mid", "seriesSlug": "x", "gameId": "3",
-                 "markets": [{"sportsMarketType": "moneyline", "volume": "50000",
-                              "bestBid": "0.50", "bestAsk": "0.52",
-                              "acceptingOrders": True, "closed": False}]},
+                {
+                    "id": "m1",
+                    "title": "Match Low",
+                    "seriesSlug": "x",
+                    "gameId": "1",
+                    "markets": [
+                        {
+                            "sportsMarketType": "moneyline",
+                            "volume": "10000",
+                            "bestBid": "0.50",
+                            "bestAsk": "0.52",
+                            "acceptingOrders": True,
+                            "closed": False,
+                        }
+                    ],
+                },
+                {
+                    "id": "m2",
+                    "title": "Match High",
+                    "seriesSlug": "x",
+                    "gameId": "2",
+                    "markets": [
+                        {
+                            "sportsMarketType": "moneyline",
+                            "volume": "90000",
+                            "bestBid": "0.50",
+                            "bestAsk": "0.52",
+                            "acceptingOrders": True,
+                            "closed": False,
+                        }
+                    ],
+                },
+                {
+                    "id": "m3",
+                    "title": "Match Mid",
+                    "seriesSlug": "x",
+                    "gameId": "3",
+                    "markets": [
+                        {
+                            "sportsMarketType": "moneyline",
+                            "volume": "50000",
+                            "bestBid": "0.50",
+                            "bestAsk": "0.52",
+                            "acceptingOrders": True,
+                            "closed": False,
+                        }
+                    ],
+                },
             ],
             "total_raw": 3,
             "partial": False,
         }
 
-        result = browse_events("test", matches_max=10, non_matches_max=10, sort_by="volume")
+        result = browse_events(
+            "test", matches_max=10, non_matches_max=10, sort_by="volume"
+        )
 
         # Highest volume first
         self.assertEqual(result["match_events"][0]["id"], "m2")  # vol=90000
         self.assertEqual(result["match_events"][1]["id"], "m3")  # vol=50000
         self.assertEqual(result["match_events"][2]["id"], "m1")  # vol=10000
 
-    @patch('browse.fetch_all_pages')
+    @patch("browse.fetch_all_pages")
     def test_browse_events_api_order_preserved_when_no_sort(self, mock_fetch):
         """sort_by=None preserves API order (no sort applied)."""
         from browse import browse_events
 
         mock_fetch.return_value = {
             "events": [
-                {"id": "m1", "title": "Match First", "seriesSlug": "x", "gameId": "1",
-                 "markets": [{"sportsMarketType": "moneyline", "volume": "1",
-                              "bestBid": "0.50", "bestAsk": "0.52",
-                              "acceptingOrders": True, "closed": False}]},
-                {"id": "m2", "title": "Match Second", "seriesSlug": "x", "gameId": "2",
-                 "markets": [{"sportsMarketType": "moneyline", "volume": "999999",
-                              "bestBid": "0.50", "bestAsk": "0.52",
-                              "acceptingOrders": True, "closed": False}]},
+                {
+                    "id": "m1",
+                    "title": "Match First",
+                    "seriesSlug": "x",
+                    "gameId": "1",
+                    "markets": [
+                        {
+                            "sportsMarketType": "moneyline",
+                            "volume": "1",
+                            "bestBid": "0.50",
+                            "bestAsk": "0.52",
+                            "acceptingOrders": True,
+                            "closed": False,
+                        }
+                    ],
+                },
+                {
+                    "id": "m2",
+                    "title": "Match Second",
+                    "seriesSlug": "x",
+                    "gameId": "2",
+                    "markets": [
+                        {
+                            "sportsMarketType": "moneyline",
+                            "volume": "999999",
+                            "bestBid": "0.50",
+                            "bestAsk": "0.52",
+                            "acceptingOrders": True,
+                            "closed": False,
+                        }
+                    ],
+                },
             ],
             "total_raw": 2,
             "partial": False,
@@ -1182,7 +1443,7 @@ class TestBrowseEvents(unittest.TestCase):
         self.assertEqual(result["match_events"][0]["id"], "m1")
         self.assertEqual(result["match_events"][1]["id"], "m2")
 
-    @patch('browse.fetch_all_pages')
+    @patch("browse.fetch_all_pages")
     def test_browse_events_returns_all_required_fields(self, mock_fetch):
         """Result dict contains all required fields."""
         from browse import browse_events
