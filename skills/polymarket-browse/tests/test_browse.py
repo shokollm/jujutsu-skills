@@ -309,6 +309,16 @@ class TestTimeFunctions(unittest.TestCase):
             self.assertEqual(td["time_urgency"], 3)
             self.assertIn("WIB", td["abs_time"])
 
+    def test_get_time_data_live_exactly_now(self):
+        """Event starts exactly now -> 'LIVE', urgency 3 (not 'In 0m')."""
+        frozen = self._frozen_dt(2026, 3, 25, 12, 0, 0)
+        with patch("browse.datetime", self._mock_datetime(frozen)):
+            from browse import _get_time_data
+
+            td = _get_time_data(self._make_event("2026-03-25T12:00:00Z"))
+            self.assertEqual(td["time_status"], "LIVE")
+            self.assertEqual(td["time_urgency"], 3)
+
     def test_get_time_data_started_2h_ago(self):
         """Started 2 hours ago -> 'LIVE 2h', urgency 3."""
         frozen = self._frozen_dt(2026, 3, 25, 14, 0, 0)
