@@ -120,7 +120,7 @@ Use `--raw` to disable the tradeable filter and see all match markets regardless
 
 ## Pagination
 
-The script fetches **ALL pages** until the API runs out of results (up to 100 pages as a safety cap).
+The script fetches **ALL pages** until the API runs out of results.
 
 ### Parallel Fetching
 
