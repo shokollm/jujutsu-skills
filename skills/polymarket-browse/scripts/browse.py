@@ -97,6 +97,7 @@ class FetchResult(TypedDict):
 PAGE_SIZE = 50
 MAX_RETRIES = 5
 INITIAL_RETRY_DELAY = 2  # exponential backoff starts at 2s
+MAX_RESPONSE_SIZE = 10 * 1024 * 1024  # 10MB limit per API response
 WIB = timezone(timedelta(hours=7))  # UTC+7 for Indonesian users
 
 GAME_CATEGORIES = {
@@ -178,7 +179,12 @@ def fetch_page(
         try:
             req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
             with urlopen(req, timeout=10) as r:
-                return json.loads(r.read())
+                data = r.read()
+                if len(data) > MAX_RESPONSE_SIZE:
+                    raise ValueError(
+                        f"API response too large: {len(data)} bytes (max {MAX_RESPONSE_SIZE})"
+                    )
+                return json.loads(data)
         except Exception:
             if attempt < max_retries - 1:
                 delay *= 2
