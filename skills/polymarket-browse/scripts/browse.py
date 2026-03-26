@@ -802,7 +802,9 @@ def print_detail(e: dict[str, Any], detail: DetailEvent) -> None:
     )
     print(f"\n{detail['time_status']}")
     print(
-        f"ML: {detail['outcomes'][0]} {format_odds(float(detail['prices'][0]))} vs {detail['outcomes'][1]} {format_odds(float(detail['prices'][1]))}"
+        f"ML: {detail['outcomes'][0]} "
+        f"{format_odds(float(detail['prices'][0]))} vs "
+        f"{detail['outcomes'][1]} {format_odds(float(detail['prices'][1]))}"
     )
     print(f"ML Vol: ${detail['volume']:,.0f} | {spread_str}")
 
@@ -815,7 +817,9 @@ def print_detail(e: dict[str, Any], detail: DetailEvent) -> None:
         )
         print(f"  [{m['type']}]")
         print(
-            f"    {m['outcomes'][0]} {format_odds(float(m['prices'][0]))} vs {m['outcomes'][1]} {format_odds(float(m['prices'][1]))}"
+            f"    {m['outcomes'][0]} "
+            f"{format_odds(float(m['prices'][0]))} vs "
+            f"{m['outcomes'][1]} {format_odds(float(m['prices'][1]))}"
         )
         print(f"    Vol: ${m['volume']:,.0f} | {spread_str}")
         print(f"    URL: {m['url']}")
