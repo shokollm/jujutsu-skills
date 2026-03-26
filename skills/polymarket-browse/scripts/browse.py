@@ -9,8 +9,83 @@ import json
 import time
 import argparse
 from datetime import datetime, timezone, timedelta
+from typing import Any, Callable, TypedDict
 from urllib.parse import urlencode
 from urllib.request import urlopen, Request
+
+
+class TimeData(TypedDict):
+    time_status: str
+    time_urgency: int
+    abs_time: str
+
+
+class MatchEvent(TypedDict):
+    title: str
+    title_clean: str
+    tournament: str
+    url: str
+    time_status: str
+    time_urgency: int
+    abs_time: str
+    team_a: str
+    team_b: str
+    odds_a: str
+    odds_b: str
+    vol: float
+
+
+class NonMatchEvent(TypedDict):
+    title: str
+    url: str
+    time_status: str
+    time_urgency: int
+    abs_time: str
+    market_count: int
+    total_vol: int
+
+
+class Market(TypedDict):
+    type: str
+    question: str
+    outcomes: list[str]
+    prices: list[str]
+    best_bid: float
+    best_ask: float
+    volume: float
+    url: str
+
+
+class DetailEvent(TypedDict):
+    title: str
+    time_status: str
+    abs_time: str
+    url: str
+    livestream: str | None
+    outcomes: list[str]
+    prices: list[str]
+    best_bid: float
+    best_ask: float
+    volume: float
+    markets: list[Market]
+
+
+class BrowseResult(TypedDict):
+    query: str
+    total_raw: int
+    total_fetched: int
+    total_match: int
+    total_non_match: int
+    match_events: list[Any]
+    non_match_events: list[Any]
+    partial: bool
+
+
+class FetchResult(TypedDict):
+    events: list[Any]
+    total_raw: int
+    partial: bool
+
 
 # ============================================================
 # CONFIG
@@ -37,11 +112,19 @@ GAME_CATEGORIES = {
 # FETCH
 # ============================================================
 
-def fetch_page(q, page=1, max_retries=MAX_RETRIES, initial_delay=INITIAL_RETRY_DELAY):
+
+def fetch_page(
+    q: str,
+    page: int = 1,
+    max_retries: int = MAX_RETRIES,
+    initial_delay: float = INITIAL_RETRY_DELAY,
+) -> dict[str, Any] | None:
     base = "https://gamma-api.polymarket.com/public-search"
-    url = (f"{base}?q={q.replace(' ', '%20')}&limit={PAGE_SIZE}&page={page}"
-           f"&search_profiles=false&search_tags=false"
-           f"&keep_closed_markets=0&events_status=active&cache=false")
+    url = (
+        f"{base}?q={q.replace(' ', '%20')}&limit={PAGE_SIZE}&page={page}"
+        f"&search_profiles=false&search_tags=false"
+        f"&keep_closed_markets=0&events_status=active&cache=false"
+    )
 
     delay = initial_delay
     for attempt in range(max_retries):
@@ -58,7 +141,10 @@ def fetch_page(q, page=1, max_retries=MAX_RETRIES, initial_delay=INITIAL_RETRY_D
             return None
     return None
 
-def fetch_all_pages(q, matches_max=None, non_matches_max=None):
+
+def fetch_all_pages(
+    q: str, matches_max: int | None = None, non_matches_max: int | None = None
+) -> FetchResult:
     """
     Fetch pages until pagination ends, or until quotas are satisfied.
 
@@ -68,7 +154,7 @@ def fetch_all_pages(q, matches_max=None, non_matches_max=None):
         non_matches_max: stop early once we have this many non-match events (None = no limit)
 
     Returns:
-        {"events": [...], "total_raw": N, "partial": bool}
+        FetchResult with events, total_raw, and partial flag
     """
     all_events = []
     total_raw = 0
@@ -104,17 +190,20 @@ def fetch_all_pages(q, matches_max=None, non_matches_max=None):
         if len(all_events) >= total_raw:
             break
 
-    partial = (total_raw > 0 and len(all_events) < total_raw)
+    partial = total_raw > 0 and len(all_events) < total_raw
     return {"events": all_events, "total_raw": total_raw, "partial": partial}
+
 
 # ============================================================
 # FILTERS
 # ============================================================
 
-def is_match_market(e):
+
+def is_match_market(e: dict[str, Any]) -> bool:
     return (e.get("seriesSlug") and e.get("gameId")) or " vs " in e.get("title", "")
 
-def get_event_url(e):
+
+def get_event_url(e: dict[str, Any]) -> str:
     """Return the correct Polymarket URL for an event.
     Match markets use /market/, non-match events use /event/.
     """
@@ -124,17 +213,20 @@ def get_event_url(e):
     else:
         return f"https://polymarket.com/event/{slug}"
 
-def get_ml_market(e):
+
+def get_ml_market(e: dict[str, Any]) -> dict[str, Any] | None:
     for m in e.get("markets", []):
         if m.get("sportsMarketType") == "moneyline":
             return m
     return None
 
-def get_ml_volume(e):
+
+def get_ml_volume(e: dict[str, Any]) -> float:
     ml = get_ml_market(e)
     return float(ml.get("volume", 0)) if ml else 0.0
 
-def is_bo2_tie(e):
+
+def is_bo2_tie(e: dict[str, Any]) -> bool:
     """
     Detect if this is a BO2 that ended in a tie (1-1).
     Returns True if all child_moneyline markets are closed (match is over but tied).
@@ -142,16 +234,21 @@ def is_bo2_tie(e):
     title = e.get("title", "")
     if "BO2" not in title:
         return False
-    
-    child_markets = [m for m in e.get("markets", []) if m.get("sportsMarketType") == "child_moneyline"]
+
+    child_markets = [
+        m
+        for m in e.get("markets", [])
+        if m.get("sportsMarketType") == "child_moneyline"
+    ]
     if len(child_markets) != 2:
         return False
-    
+
     # If both child markets are closed, it's likely a finished BO2
     all_closed = all(m.get("closed", False) for m in child_markets)
     return all_closed
 
-def is_tradeable_event(e):
+
+def is_tradeable_event(e: dict[str, Any]) -> bool:
     ml = get_ml_market(e)
     if not ml:
         return False
@@ -160,7 +257,7 @@ def is_tradeable_event(e):
     ml_vol = float(ml.get("volume", 0))
     accepting = ml.get("acceptingOrders", False)
     ml_closed = ml.get("closed", True)
-    
+
     # Filter: market has converged (bestBid >= 0.99 means near-resolved)
     if best_bid >= 0.99:
         return False
@@ -181,18 +278,18 @@ def is_tradeable_event(e):
     end_str = e.get("endDate", "")
     if end_str:
         try:
-            end_dt = datetime.fromisoformat(end_str.replace('Z', '+00:00'))
+            end_dt = datetime.fromisoformat(end_str.replace("Z", "+00:00"))
             now = datetime.now(timezone.utc)
             if end_dt < now:
                 return False
         except:
             pass
-    
+
     # Filter: match has already started (startTime is in the past)
     start_str = e.get("startTime") or e.get("startDate", "")
     if start_str:
         try:
-            start_dt = datetime.fromisoformat(start_str.replace('Z', '+00:00'))
+            start_dt = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
             now = datetime.now(timezone.utc)
             if start_dt < now:
                 # Check if it's recently started (within 4h) — consider those "live" still
@@ -201,15 +298,16 @@ def is_tradeable_event(e):
                     return False
         except:
             pass
-    
+
     return True
 
-def is_tradeable_market(m):
+
+def is_tradeable_market(m: dict[str, Any]) -> bool:
     accepting = m.get("acceptingOrders", False)
     closed = m.get("closed", True)
     best_ask = float(m.get("bestAsk", 0))
     best_bid = float(m.get("bestBid", 0))
-    
+
     # Filter: market has converged (bestBid >= 0.99)
     if best_bid >= 0.99:
         return False
@@ -221,25 +319,29 @@ def is_tradeable_market(m):
         return False
     if closed:
         return False
-    
+
     return True
+
 
 # ============================================================
 # FORMATTING
 # ============================================================
 
-def prob_to_cents(p):
+
+def prob_to_cents(p: float) -> int:
     return int(round(p * 100))
 
-def format_odds(p):
+
+def format_odds(p: float) -> str:
     return f"{prob_to_cents(p)}c"
 
-def format_spread(bid, ask):
+
+def format_spread(bid: float, ask: float) -> str:
     spread = ask - bid
     return f"{prob_to_cents(spread)}c"
 
 
-def _get_time_data(e, tz=None):
+def _get_time_data(e: dict[str, Any], tz: timezone | None = None) -> TimeData:
     """
     Unified time data extraction for event timestamps.
 
@@ -253,11 +355,7 @@ def _get_time_data(e, tz=None):
             Defaults to WIB (UTC+7).
 
     Returns:
-        {
-            "time_status": str,    # e.g. "LIVE", "In 6h", "12h ago"
-            "time_urgency": int,  # 0-3 (higher = more urgent/live)
-            "abs_time": str,       # e.g. "Mar 25, 19:00 WIB" or "TBD"
-        }
+        TimeData with time_status, time_urgency, and abs_time
     """
     tz = tz or WIB
     start_str = e.get("startTime") or e.get("startDate", "")
@@ -266,7 +364,7 @@ def _get_time_data(e, tz=None):
         return {"time_status": "TBD", "time_urgency": 0, "abs_time": "TBD"}
 
     try:
-        start_dt = datetime.fromisoformat(start_str.replace('Z', '+00:00'))
+        start_dt = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
         now_utc = datetime.now(timezone.utc)
         delta = start_dt - now_utc
         total_sec = delta.total_seconds()
@@ -307,18 +405,24 @@ def _get_time_data(e, tz=None):
             abs_time += "WIB"
         else:
             abs_time += start_dt.astimezone(tz).strftime("%Z")
-        return {"time_status": time_status, "time_urgency": time_urgency, "abs_time": abs_time}
+        return {
+            "time_status": time_status,
+            "time_urgency": time_urgency,
+            "abs_time": abs_time,
+        }
     except Exception:
         return {"time_status": "", "time_urgency": 0, "abs_time": "TBD"}
 
 
-def filter_events(events, tradeable_only=True):
+def filter_events(
+    events: list[dict[str, Any]], tradeable_only: bool = True
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """
     Classify events into match_markets and non_match_markets.
     If tradeable_only=True, also filter out non-tradeable events.
     """
-    match_events = []
-    non_match_events = []
+    match_events: list[dict[str, Any]] = []
+    non_match_events: list[dict[str, Any]] = []
 
     for e in events:
         if is_match_market(e):
@@ -330,14 +434,22 @@ def filter_events(events, tradeable_only=True):
     return match_events, non_match_events
 
 
-def sort_events(events):
+def sort_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(events, key=get_ml_volume, reverse=True)
+
 
 # ============================================================
 # BROWSE
 # ============================================================
 
-def browse_events(q, matches_max=10, non_matches_max=10, tradeable_only=True, sort_by=None):
+
+def browse_events(
+    q: str,
+    matches_max: int = 10,
+    non_matches_max: int = 10,
+    tradeable_only: bool = True,
+    sort_by: str | None = None,
+) -> BrowseResult:
     """
     Browse Polymarket events.
 
@@ -350,11 +462,13 @@ def browse_events(q, matches_max=10, non_matches_max=10, tradeable_only=True, so
     """
     # Pass quotas to fetch_all_pages for early-exit optimization.
     # Only use early-exit when sort_by is None (no client-side sort needed).
-    use_early_exit = (sort_by is None)
+    use_early_exit = sort_by is None
     fetch_matches_max = matches_max if use_early_exit else None
     fetch_non_matches_max = non_matches_max if use_early_exit else None
 
-    result = fetch_all_pages(q, matches_max=fetch_matches_max, non_matches_max=fetch_non_matches_max)
+    result = fetch_all_pages(
+        q, matches_max=fetch_matches_max, non_matches_max=fetch_non_matches_max
+    )
     events = result["events"]
     match_events, non_match_events = filter_events(events, tradeable_only)
 
@@ -374,30 +488,19 @@ def browse_events(q, matches_max=10, non_matches_max=10, tradeable_only=True, so
         "partial": result.get("partial", False),
     }
 
+
 # ============================================================
 # FORMAT — EVENT
 # ============================================================
 
-def format_match_event(e):
+
+def format_match_event(e: dict[str, Any]) -> MatchEvent:
     """
     Format a match event into a canonical dict for rendering.
     All computing done here; renderers just template.
 
     Returns:
-        {
-            "title": str,           # raw title
-            "title_clean": str,      # "Team A vs Team B"
-            "tournament": str,       # "Tournament Name" or ""
-            "url": str,
-            "time_status": str,      # "LIVE", "In 6h", "12h ago"
-            "time_urgency": int,     # 0-3
-            "abs_time": str,         # "Mar 25, 19:00 WIB"
-            "team_a": str,
-            "team_b": str,
-            "odds_a": str,           # "55c"
-            "odds_b": str,
-            "vol": int,
-        }
+        MatchEvent with all required fields
     """
     ml = get_ml_market(e)
     outcomes = json.loads(ml.get("outcomes", "[]")) if ml else []
@@ -433,20 +536,12 @@ def format_match_event(e):
     }
 
 
-def format_non_match_event(e):
+def format_non_match_event(e: dict[str, Any]) -> NonMatchEvent:
     """
     Format a non-match event into a canonical dict for rendering.
 
     Returns:
-        {
-            "title": str,
-            "url": str,
-            "time_status": str,
-            "time_urgency": int,
-            "abs_time": str,
-            "market_count": int,
-            "total_vol": int,
-        }
+        NonMatchEvent with all required fields
     """
     td = _get_time_data(e)
     total_vol = sum(float(m.get("volume", 0)) for m in e.get("markets", []))
@@ -467,7 +562,8 @@ def format_non_match_event(e):
 # FORMAT — RENDER
 # ============================================================
 
-def render_match_lines(event_dict, i, mode):
+
+def render_match_lines(event_dict: MatchEvent, i: int, mode: str) -> list[str]:
     """
     Render a formatted match event dict into lines of text.
 
@@ -494,9 +590,7 @@ def render_match_lines(event_dict, i, mode):
     lines = []
 
     if mode == "html":
-        lines.append(
-            f"<b>{i}.</b> <a href=\"{url}\">{escape_html(title_clean)}</a>"
-        )
+        lines.append(f'<b>{i}.</b> <a href="{url}">{escape_html(title_clean)}</a>')
     else:
         lines.append(f"{i}. [{title_clean}]({url})")
 
@@ -511,7 +605,7 @@ def render_match_lines(event_dict, i, mode):
     return lines
 
 
-def render_non_match_lines(event_dict, i, mode):
+def render_non_match_lines(event_dict: NonMatchEvent, i: int, mode: str) -> list[str]:
     """
     Render a formatted non-match event dict into lines of text.
 
@@ -533,7 +627,7 @@ def render_non_match_lines(event_dict, i, mode):
     lines = []
 
     if mode == "html":
-        lines.append(f"<b>{i}.</b> <a href=\"{url}\">{escape_html(title)}</a>")
+        lines.append(f'<b>{i}.</b> <a href="{url}">{escape_html(title)}</a>')
     else:
         lines.append(f"{i}. [{title}]({url})")
 
@@ -547,7 +641,8 @@ def render_non_match_lines(event_dict, i, mode):
 # FORMAT — LEGACY
 # ============================================================
 
-def format_event(e):
+
+def format_event(e: dict[str, Any]) -> dict[str, Any]:
     ml = get_ml_market(e)
     outcomes = json.loads(ml.get("outcomes", "[]")) if ml else []
     prices = json.loads(ml.get("outcomePrices", "[]")) if ml else []
@@ -569,14 +664,18 @@ def format_event(e):
         "volume": vol,
     }
 
-def format_detail_event(e):
+
+def format_detail_event(e: dict[str, Any]) -> DetailEvent:
     ml = get_ml_market(e)
-    
+
     active_markets = [
-        m for m in e.get("markets", [])
+        m
+        for m in e.get("markets", [])
         if float(m.get("volume", 0)) > 0 and is_tradeable_market(m)
     ]
-    active_markets = sorted(active_markets, key=lambda m: float(m.get("volume", 0)), reverse=True)
+    active_markets = sorted(
+        active_markets, key=lambda m: float(m.get("volume", 0)), reverse=True
+    )
 
     td = _get_time_data(e)
 
@@ -606,18 +705,21 @@ def format_detail_event(e):
         ],
     }
 
+
 # ============================================================
 # DISPLAY
 # ============================================================
 
-def get_header_date():
+
+def get_header_date() -> str:
     """Return current date string like 'Mar 25, 2026'"""
     now_utc = datetime.now(timezone.utc)
     utc7 = timezone(timedelta(hours=7))
     now_utc7 = now_utc.astimezone(utc7)
     return now_utc7.strftime("%b %d, %Y")
 
-def get_tournament(title):
+
+def get_tournament(title: str) -> str:
     """Extract tournament name from event title. Title format: 'Category: Team A vs Team B (BO/X) - Tournament Name'"""
     if " - " in title:
         parts = title.split(" - ")
@@ -625,8 +727,23 @@ def get_tournament(title):
             return " - ".join(parts[1:]).strip()
     return ""
 
-def print_browse(match_events, non_match_events, category, total_raw, total_fetched, total_match, total_non_match, raw_mode=False, partial=False, non_matches_max=5, matches_only=False, non_matches_only=False):
+
+def print_browse(
+    match_events,
+    non_match_events,
+    category,
+    total_raw,
+    total_fetched,
+    total_match,
+    total_non_match,
+    raw_mode=False,
+    partial=False,
+    non_matches_max=5,
+    matches_only=False,
+    non_matches_only=False,
+):
     from datetime import datetime, timezone, timedelta
+
     now_utc = datetime.now(timezone.utc)
     utc7 = timezone(timedelta(hours=7))
     now_utc7 = now_utc.astimezone(utc7)
@@ -636,7 +753,9 @@ def print_browse(match_events, non_match_events, category, total_raw, total_fetc
     print(f"Current time (WIB): {now_utc7.strftime('%H:%M WIB')} | {header_date}")
 
     if raw_mode:
-        print(f"Fetched: {total_fetched} / Total API: {total_raw} | Match: {total_match} | Non-match: {total_non_match}")
+        print(
+            f"Fetched: {total_fetched} / Total API: {total_raw} | Match: {total_match} | Non-match: {total_non_match}"
+        )
     if partial:
         print(f"WARNING: Partial fetch (API error or timeout) — data may be incomplete")
 
@@ -670,38 +789,56 @@ def print_browse(match_events, non_match_events, category, total_raw, total_fetc
             for line in render_non_match_lines(fd, i, mode="text"):
                 print(line)
 
-def print_detail(e, detail):
+
+def print_detail(e: dict[str, Any], detail: DetailEvent) -> None:
     print(f"\n{detail['title']}")
     print(f"URL: {detail['url']}")
     print(f"Livestream: {detail['livestream']}")
 
-    spread_str = format_spread(detail["best_bid"], detail["best_ask"]) if detail["best_bid"] and detail["best_ask"] else "N/A"
+    spread_str = (
+        format_spread(detail["best_bid"], detail["best_ask"])
+        if detail["best_bid"] and detail["best_ask"]
+        else "N/A"
+    )
     print(f"\n{detail['time_status']}")
-    print(f"ML: {detail['outcomes'][0]} {format_odds(float(detail['prices'][0]))} vs {detail['outcomes'][1]} {format_odds(float(detail['prices'][1]))}")
+    print(
+        f"ML: {detail['outcomes'][0]} {format_odds(float(detail['prices'][0]))} vs {detail['outcomes'][1]} {format_odds(float(detail['prices'][1]))}"
+    )
     print(f"ML Vol: ${detail['volume']:,.0f} | {spread_str}")
-    
+
     print(f"\nMarkets ({len(detail['markets'])}):")
     for m in detail["markets"]:
-        spread_str = format_spread(m["best_bid"], m["best_ask"]) if m["best_bid"] and m["best_ask"] else "N/A"
+        spread_str = (
+            format_spread(m["best_bid"], m["best_ask"])
+            if m["best_bid"] and m["best_ask"]
+            else "N/A"
+        )
         print(f"  [{m['type']}]")
-        print(f"    {m['outcomes'][0]} {format_odds(float(m['prices'][0]))} vs {m['outcomes'][1]} {format_odds(float(m['prices'][1]))}")
+        print(
+            f"    {m['outcomes'][0]} {format_odds(float(m['prices'][0]))} vs {m['outcomes'][1]} {format_odds(float(m['prices'][1]))}"
+        )
         print(f"    Vol: ${m['volume']:,.0f} | {spread_str}")
         print(f"    URL: {m['url']}")
+
 
 # ============================================================
 # TELEGRAM
 # ============================================================
 
-def escape_html(text):
+
+def escape_html(text: str) -> str:
     """Escape HTML-sensitive characters for Telegram parse_mode=HTML."""
-    return (text
-        .replace("&", "&amp;")
+    return (
+        text.replace("&", "&amp;")
         .replace("<", "&lt;")
         .replace(">", "&gt;")
-        .replace('"', "&quot;"))
+        .replace('"', "&quot;")
+    )
 
 
-def send_telegram_message(bot_token, chat_id, text, timeout=10):
+def send_telegram_message(
+    bot_token: str, chat_id: str, text: str, timeout: int = 10
+) -> int:
     """Send a message via Telegram bot API. Returns the message ID on success.
 
     Raises:
@@ -709,12 +846,14 @@ def send_telegram_message(bot_token, chat_id, text, timeout=10):
         URLError/HTTPError: On network or HTTP-level failures.
     """
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    data = urlencode({
-        "chat_id": chat_id,
-        "text": text,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": "true",
-    }).encode("utf-8")
+    data = urlencode(
+        {
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": "true",
+        }
+    ).encode("utf-8")
     req = Request(url, data=data, method="POST")
     with urlopen(req, timeout=timeout) as resp:
         result = json.loads(resp.read())
@@ -723,15 +862,23 @@ def send_telegram_message(bot_token, chat_id, text, timeout=10):
         return result["result"]["message_id"]
 
 
-def send_to_telegram(match_events, non_match_events, category, matches_only=False, non_matches_only=False):
+def send_to_telegram(
+    match_events: list[dict[str, Any]],
+    non_match_events: list[dict[str, Any]],
+    category: str,
+    matches_only: bool = False,
+    non_matches_only: bool = False,
+) -> None:
     """Send browse results to Telegram. Reads TELEGRAM_BOT_TOKEN and CHAT_ID from environment."""
     import os
+
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("CHAT_ID")
     if not bot_token or not chat_id:
         raise RuntimeError("TELEGRAM_BOT_TOKEN or CHAT_ID not set in environment")
 
     from datetime import datetime, timezone, timedelta
+
     now_utc = datetime.now(timezone.utc)
     utc7 = timezone(timedelta(hours=7))
     now_utc7 = now_utc.astimezone(utc7)
@@ -774,7 +921,14 @@ def send_to_telegram(match_events, non_match_events, category, matches_only=Fals
     send_chunked(lines, send, category, header_date, show_matches, show_non_matches)
 
 
-def send_chunked(all_lines, send_fn, category, header_date, show_matches, show_non_matches):
+def send_chunked(
+    all_lines: list[str],
+    send_fn: Callable[[str], None],
+    category: str,
+    header_date: str,
+    show_matches: bool,
+    show_non_matches: bool,
+) -> None:
     """
     Split already-built lines into Telegram-safe chunks and send them.
 
@@ -837,52 +991,98 @@ def send_chunked(all_lines, send_fn, category, header_date, show_matches, show_n
 # MAIN
 # ============================================================
 
-def main():
-    parser = argparse.ArgumentParser(description="Browse Polymarket tradeable events by game category.")
-    parser.add_argument("--category", default="Counter Strike", 
-                       choices=list(GAME_CATEGORIES.keys()),
-                       help="Game category to browse")
-    parser.add_argument("--limit", type=int, default=5,
-                       help="Max events per section (match + non-match). Default: 5")
-    parser.add_argument("--matches", type=int, default=None,
-                       help="Max match markets to show. Default: --limit")
-    parser.add_argument("--non-matches", type=int, default=None,
-                       help="Max non-match markets to show. Default: --limit")
-    parser.add_argument("--search", type=str, default=None,
-                       help="Free-text team/term search within the selected category. Overrides default query.")
-    parser.add_argument("--matches-only", action="store_true",
-                       help="Show only match markets (suppress non-match section).")
-    parser.add_argument("--non-matches-only", action="store_true",
-                       help="Show only non-match markets (suppress match section).")
-    parser.add_argument("--list-categories", action="store_true",
-                       help="List available game categories and exit")
-    parser.add_argument("--detail", type=int, default=1,
-                       help="Index of match event (1-indexed) to show detailed markets. Default: 1. Set to 0 to disable.")
-    parser.add_argument("--raw", action="store_true",
-                       help="Show all events without tradeable filter (for debugging).")
-    parser.add_argument("--telegram", action="store_true",
-                       help="Send results to Telegram (TELEGRAM_BOT_TOKEN and CHAT_ID must be set in environment).")
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Browse Polymarket tradeable events by game category."
+    )
+    parser.add_argument(
+        "--category",
+        default="Counter Strike",
+        choices=list(GAME_CATEGORIES.keys()),
+        help="Game category to browse",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=5,
+        help="Max events per section (match + non-match). Default: 5",
+    )
+    parser.add_argument(
+        "--matches",
+        type=int,
+        default=None,
+        help="Max match markets to show. Default: --limit",
+    )
+    parser.add_argument(
+        "--non-matches",
+        type=int,
+        default=None,
+        help="Max non-match markets to show. Default: --limit",
+    )
+    parser.add_argument(
+        "--search",
+        type=str,
+        default=None,
+        help="Free-text team/term search within the selected category. Overrides default query.",
+    )
+    parser.add_argument(
+        "--matches-only",
+        action="store_true",
+        help="Show only match markets (suppress non-match section).",
+    )
+    parser.add_argument(
+        "--non-matches-only",
+        action="store_true",
+        help="Show only non-match markets (suppress match section).",
+    )
+    parser.add_argument(
+        "--list-categories",
+        action="store_true",
+        help="List available game categories and exit",
+    )
+    parser.add_argument(
+        "--detail",
+        type=int,
+        default=1,
+        help="Index of match event (1-indexed) to show detailed markets. Default: 1. Set to 0 to disable.",
+    )
+    parser.add_argument(
+        "--raw",
+        action="store_true",
+        help="Show all events without tradeable filter (for debugging).",
+    )
+    parser.add_argument(
+        "--telegram",
+        action="store_true",
+        help="Send results to Telegram (TELEGRAM_BOT_TOKEN and CHAT_ID must be set in environment).",
+    )
     args = parser.parse_args()
-    
+
     if args.list_categories:
         print("Available categories:")
         for name in GAME_CATEGORIES:
             print(f"  - {name}")
         return
-    
+
     category_term = GAME_CATEGORIES[args.category]
     search_term = f"{category_term} {args.search}" if args.search else category_term
     tradeable_only = not args.raw
     matches_max = args.matches if args.matches is not None else args.limit
     non_matches_max = args.non_matches if args.non_matches is not None else args.limit
-    
+
     if args.search:
         print(f"\nFetching {args.category} events matching '{args.search}'...")
     else:
         print(f"\nFetching {args.category} events...")
-    
-    result = browse_events(search_term, matches_max=matches_max, non_matches_max=non_matches_max, tradeable_only=tradeable_only)
-    
+
+    result = browse_events(
+        search_term,
+        matches_max=matches_max,
+        non_matches_max=non_matches_max,
+        tradeable_only=tradeable_only,
+    )
+
     print_browse(
         result["match_events"],
         result["non_match_events"],
@@ -895,9 +1095,9 @@ def main():
         partial=result.get("partial", False),
         non_matches_max=non_matches_max,
         matches_only=args.matches_only,
-        non_matches_only=args.non_matches_only
+        non_matches_only=args.non_matches_only,
     )
-    
+
     # Print detail for selected event if any
     if result["match_events"] and args.detail > 0:
         print("\n")
@@ -907,7 +1107,7 @@ def main():
         detail_event = result["match_events"][idx]
         detail = format_detail_event(detail_event)
         print_detail(detail_event, detail)
-    
+
     # Send to Telegram if requested
     if args.telegram:
         send_to_telegram(
@@ -915,8 +1115,9 @@ def main():
             result["non_match_events"],
             args.category,
             matches_only=args.matches_only,
-            non_matches_only=args.non_matches_only
+            non_matches_only=args.non_matches_only,
         )
+
 
 if __name__ == "__main__":
     main()
