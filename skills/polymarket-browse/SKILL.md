@@ -34,7 +34,7 @@ hermes mcp add polymarket https://docs.polymarket.com/mcp
 ## Usage
 
 ```
-polymarket-browse [--category "Counter Strike"] [--limit 5] [--matches N] [--non-matches N] [--search "TeamName"] [--matches-only] [--non-matches-only] [--detail N] [--raw] [--telegram] [--no-cache] [--max-total N]
+polymarket-browse [--category "Counter Strike"] [--limit 5] [--matches N] [--non-matches N] [--search "TeamName"] [--matches-only] [--non-matches-only] [--detail N] [--raw] [--telegram] [--no-cache] [--max-total N] [--starts-before TIMESTAMP]
 ```
 
 ## Arguments
@@ -51,6 +51,7 @@ polymarket-browse [--category "Counter Strike"] [--limit 5] [--matches N] [--non
 - `--raw` : Show all events without tradeable filter (for debugging). Includes fetch stats.
 - `--no-cache` : Disable caching and fetch fresh data from the API.
 - `--max-total` : Maximum total events to fetch before early exit. Default: no limit. Useful for quick snapshots.
+- `--starts-before` : Unix timestamp filter. Only show match events starting before this time (LIVE events always shown regardless of timestamp).
 - `--telegram` : Send results to Telegram. Requires `BOT_TOKEN` and `CHAT_ID` in environment variables.
 
 ## Output Format

@@ -1839,5 +1839,92 @@ class TestBrowseEvents(unittest.TestCase):
         self.assertIn("partial", result)
 
 
+class TestStartsBeforeFilter(unittest.TestCase):
+    """Tests for --starts-before filter in browse_events()."""
+
+    def _make_event(self, event_id, start_time, volume="50000"):
+        """Helper to create a minimal match event with startTime and valid tradeable data."""
+        return {
+            "id": event_id,
+            "title": f"Match {event_id}",
+            "seriesSlug": "x",
+            "gameId": "1",
+            "startTime": start_time,
+            "markets": [
+                {
+                    "sportsMarketType": "moneyline",
+                    "volume": volume,
+                    "bestBid": "0.50",
+                    "bestAsk": "0.52",
+                    "acceptingOrders": True,
+                    "closed": False,
+                }
+            ],
+        }
+
+    @patch("browse.fetch_all_pages")
+    def test_starts_before_filters_future_events(self, mock_fetch):
+        """Events with startTime > timestamp should be filtered out."""
+        from browse import browse_events
+
+        mock_fetch.return_value = {
+            "events": [
+                self._make_event(
+                    "m1", "2026-03-27T14:00:00Z"
+                ),  # After cutoff (14:00 > 12:00)
+                self._make_event("m2", "2026-03-28T12:00:00Z"),  # After cutoff
+            ],
+            "total_raw": 2,
+            "partial": False,
+        }
+
+        # 2026-03-27T12:00:00Z = 1774612800
+        result = browse_events("test", starts_before=1774612800)
+
+        self.assertEqual(len(result["match_events"]), 0)
+
+    @patch("browse.fetch_all_pages")
+    def test_starts_before_includes_past_events(self, mock_fetch):
+        """Events with startTime <= timestamp should be included."""
+        from browse import browse_events
+
+        mock_fetch.return_value = {
+            "events": [
+                self._make_event(
+                    "m1", "2026-03-27T10:00:00Z"
+                ),  # Before cutoff (10:00 < 12:00)
+                self._make_event(
+                    "m2", "2026-03-27T11:00:00Z"
+                ),  # Before cutoff (11:00 < 12:00)
+            ],
+            "total_raw": 2,
+            "partial": False,
+        }
+
+        # 2026-03-27T12:00:00Z = 1774612800
+        result = browse_events("test", starts_before=1774612800)
+
+        self.assertEqual(len(result["match_events"]), 2)
+
+    @patch("browse.fetch_all_pages")
+    def test_starts_before_without_timestamp(self, mock_fetch):
+        """Without starts_before, all events should be returned."""
+        from browse import browse_events
+
+        mock_fetch.return_value = {
+            "events": [
+                self._make_event("m1", "2026-03-27T14:00:00Z"),
+                self._make_event("m2", "2026-03-28T12:00:00Z"),
+            ],
+            "total_raw": 2,
+            "partial": False,
+        }
+
+        result = browse_events("test")
+
+        # No filter, all events returned
+        self.assertEqual(len(result["match_events"]), 2)
+
+
 if __name__ == "__main__":
     unittest.main()
