@@ -1,5 +1,6 @@
 ---
 name: polymarket-browse
+version: 0.0.2
 category: research
 description: Browse tradeable Polymarket events by game category. Shows active matches with ML odds (cents format), volume, tournament, and market URLs. Supports Counter Strike, League of Legends, Dota 2, Valorant, NBA, NFL, UFC, Tennis.
 ---
