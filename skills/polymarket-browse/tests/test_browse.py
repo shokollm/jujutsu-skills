@@ -1118,7 +1118,7 @@ class TestFetchAllPages(unittest.TestCase):
                 {"id": "n1", "title": "Non-match 1", "markets": []},
                 {"id": "n2", "title": "Non-match 2", "markets": []},
             ],
-            "pagination": {"totalResults": 200, "hasMore": True},
+            "pagination": {"totalResults": 20, "hasMore": True},
         }
         page2 = {
             "events": [
@@ -1131,15 +1131,15 @@ class TestFetchAllPages(unittest.TestCase):
                 },
                 {"id": "n3", "title": "Non-match 3", "markets": []},
             ],
-            "pagination": {"totalResults": 200, "hasMore": True},
+            "pagination": {"totalResults": 20, "hasMore": True},
         }
         page3 = {
             "events": [],
-            "pagination": {"totalResults": 200, "hasMore": True},
+            "pagination": {"totalResults": 20, "hasMore": True},
         }
         page4 = {
             "events": [],
-            "pagination": {"totalResults": 200, "hasMore": True},
+            "pagination": {"totalResults": 20, "hasMore": True},
         }
 
         mock_fetch_page.return_value = page1
@@ -1169,15 +1169,15 @@ class TestFetchAllPages(unittest.TestCase):
 
         page1 = {
             "events": [{"id": "e1", "title": "Event 1", "markets": []}],
-            "pagination": {"totalResults": 150, "hasMore": True},
+            "pagination": {"totalResults": 15, "hasMore": True},
         }
         page2 = {
             "events": [{"id": "e2", "title": "Event 2", "markets": []}],
-            "pagination": {"totalResults": 150, "hasMore": True},
+            "pagination": {"totalResults": 15, "hasMore": True},
         }
         page3 = {
             "events": [{"id": "e3", "title": "Event 3", "markets": []}],
-            "pagination": {"totalResults": 150, "hasMore": False},
+            "pagination": {"totalResults": 15, "hasMore": False},
         }
 
         mock_fetch_page.return_value = page1
@@ -1223,7 +1223,7 @@ class TestFetchAllPages(unittest.TestCase):
                     "markets": [],
                 },
             ],
-            "pagination": {"totalResults": 200, "hasMore": True},
+            "pagination": {"totalResults": 20, "hasMore": True},
         }
         page2 = {
             "events": [
@@ -1231,15 +1231,15 @@ class TestFetchAllPages(unittest.TestCase):
                 {"id": "n2", "title": "Non-match 2", "markets": []},
                 {"id": "n3", "title": "Non-match 3", "markets": []},
             ],
-            "pagination": {"totalResults": 200, "hasMore": True},
+            "pagination": {"totalResults": 20, "hasMore": True},
         }
         page3 = {
             "events": [],
-            "pagination": {"totalResults": 200, "hasMore": True},
+            "pagination": {"totalResults": 20, "hasMore": True},
         }
         page4 = {
             "events": [],
-            "pagination": {"totalResults": 200, "hasMore": True},
+            "pagination": {"totalResults": 20, "hasMore": True},
         }
 
         mock_fetch_page.return_value = page1
@@ -1267,23 +1267,20 @@ class TestParallelFetchConcurrency(unittest.TestCase):
     def test_parallel_fetch_uses_batch_size_of_5(
         self, mock_fetch_page, mock_parallel_fetch, mock_cache
     ):
-        """With 10 pages (totalResults=500), verify concurrency=5 means 5 calls per batch."""
+        """With 10 pages (totalResults=50), verify 10 calls are made with concurrency=5."""
         from browse import fetch_all_pages
 
         page = {
             "events": [{"id": "e1", "title": "Event 1", "markets": []}],
-            "pagination": {"totalResults": 500, "hasMore": True},
+            "pagination": {"totalResults": 50, "hasMore": True},
         }
         mock_fetch_page.return_value = page
         mock_parallel_fetch.return_value = (1, page)
 
         result = fetch_all_pages("test", use_cache=False)
 
-        total_pages = (500 + 50 - 1) // 50  # = 10 pages
-        concurrency = min(5, total_pages)  # = 5
-        expected_batches = (total_pages + concurrency - 1) // concurrency  # = 2 batches
-
-        self.assertEqual(mock_parallel_fetch.call_count, 10)
+        total_pages = (50 + 4) // 5  # = 10 pages (API returns 5 per page)
+        self.assertEqual(mock_parallel_fetch.call_count, total_pages)
 
     @patch("browse._read_cache", return_value=None)
     @patch("browse._fetch_page_with_index")
@@ -1394,7 +1391,7 @@ class TestMaxTotalParameter(unittest.TestCase):
                                 "markets": [],
                             }
                         ],
-                        "pagination": {"totalResults": 500, "hasMore": True},
+                        "pagination": {"totalResults": 50, "hasMore": True},
                     },
                 )
             )
@@ -1432,7 +1429,7 @@ class TestMaxTotalParameter(unittest.TestCase):
                     "markets": [],
                 },
             ],
-            "pagination": {"totalResults": 100, "hasMore": True},
+            "pagination": {"totalResults": 5, "hasMore": True},
         }
         mock_fetch_page.return_value = page1
         mock_parallel_fetch.side_effect = [(1, page1)]

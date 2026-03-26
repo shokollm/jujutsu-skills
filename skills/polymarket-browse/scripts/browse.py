@@ -235,7 +235,7 @@ def fetch_all_pages(
     if total_raw == 0:
         return {"events": [], "total_raw": 0, "partial": False}
 
-    total_pages = (total_raw + PAGE_SIZE - 1) // PAGE_SIZE
+    total_pages = (total_raw + 4) // 5
     concurrency = min(MAX_PARALLEL_FETCHES, total_pages)
 
     all_page_data: dict[int, list[Any]] = {}
