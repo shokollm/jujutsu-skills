@@ -47,7 +47,11 @@ polymarket-browse [--category "Counter Strike"] [--limit 5] [--matches N] [--non
 - `--search` : Free-text team/term search within the selected category. Appends to the category query. Example: `--category "Counter Strike" --search "FlyQuest"`
 - `--matches-only` : Show only match markets (suppress non-match section).
 - `--non-matches-only` : Show only non-match markets (suppress match section).
-- `--detail` : Index of match event (1-indexed) to show detailed markets. Default: 1. Set to 0 to disable.
+- `--detail N` : Show detailed markets for match event N (1-indexed).
+  - Only applies to MATCH markets (not non-match/tournament markets)
+  - Default: 1 (auto-shows details for first match)
+  - Set to 0 to disable detail view
+  - If N exceeds available matches, shows error with available range
 - `--list-categories` : List available game categories and exit
 - `--raw` : Show all events without tradeable filter (for debugging). Includes fetch stats.
 - `--no-cache` : Disable caching and fetch fresh data from the API.
@@ -153,3 +157,113 @@ All odds are shown in **cents** format:
 - `30c` = 0.30 probability
 - `95c` = 0.95 probability
 - `GamerLegion 28c | 72c Team Yandex` = GamerLegion at 28c, Team Yandex at 72c
+
+## Troubleshooting
+
+### "WARNING: Partial fetch" appears
+The API returned incomplete data due to an error/timeout. Results shown may be incomplete. Try again with `--no-cache` to force a fresh fetch.
+
+### No markets appear
+- Verify your category is correct: `--list-categories`
+- Try with `--raw` to see all events (not just tradeable ones)
+- Some categories may have no active match markets at certain times
+
+### Why did my match disappear?
+Matches are filtered out when:
+- They have ended (startTime > 4 hours ago)
+- BO2 matches ended in a tie (1-1)
+- The market has converged (bestBid >= 0.99 or bestAsk <= 0.01)
+- The event has ended (endDate passed)
+
+### Telegram not working
+- Verify `BOT_TOKEN` and `CHAT_ID` environment variables are set
+- Ensure bot is started and chat ID is correct
+- Check Telegram has not blocked the bot
+
+## Examples
+
+### Basic usage
+```bash
+# Browse Counter Strike matches (default)
+polymarket-browse
+
+# Browse NBA matches
+polymarket-browse --category NBA
+
+# Show more results
+polymarket-browse --limit 10
+```
+
+### Searching for teams
+```bash
+# Find FlyQuest Counter Strike matches
+polymarket-browse --category "Counter Strike" --search "FlyQuest"
+
+# Find any team/event across category
+polymarket-browse --category "Counter Strike" --search "Spirit"
+```
+
+### Filtering results
+```bash
+# Show only match markets (no tournament futures)
+polymarket-browse --matches-only
+
+# Show only non-match markets (tournaments, props)
+polymarket-browse --non-matches-only
+
+# Different limits for each section
+polymarket-browse --matches 10 --non-matches 5
+```
+
+### Using --detail
+```bash
+# Show details for 1st match (default behavior, auto-enabled)
+polymarket-browse --detail 1
+
+# Show details for 3rd match
+polymarket-browse --detail 3
+
+# Disable detail view
+polymarket-browse --detail 0
+```
+
+### Debugging
+```bash
+# Show all events without tradeable filter
+polymarket-browse --raw
+
+# Force fresh data (bypass cache)
+polymarket-browse --no-cache
+
+# Limit total events for quick snapshot
+polymarket-browse --max-total 20
+```
+
+### Timezone
+```bash
+# Display times in different timezone (default: UTC+7/WIB)
+polymarket-browse --timezone UTC+8
+polymarket-browse --timezone UTC-5
+```
+
+## Changelog
+
+### v0.0.2 (Current)
+- Added `--matches-only` and `--non-matches-only` filters
+- Added `--max-total` for limiting fetch size
+- Added Telegram support with `--telegram` flag
+- Added `--timezone` argument for display timezone configuration
+- Improved BO2 tie detection
+
+### v0.0.1
+- Initial release
+- Basic Polymarket browsing by category
+- Match/non-match market filtering
+- Moneyline odds display
+
+## Credits
+
+**Author:** shokollm  
+**Repository:** https://github.com/shokollm/jujutsu-skills
+
+Built for Hermes Agent and OpenClaw.
