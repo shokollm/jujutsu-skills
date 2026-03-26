@@ -235,6 +235,8 @@ def fetch_all_pages(
     if total_raw == 0:
         return {"events": [], "total_raw": 0, "partial": False}
 
+    # API always returns exactly 5 events per page regardless of 'limit' param.
+    # This is integer ceiling division: ceil(total_raw / 5) = (total_raw + 5 - 1) // 5 = (total_raw + 4) // 5
     total_pages = (total_raw + 4) // 5
     concurrency = min(MAX_PARALLEL_FETCHES, total_pages)
 
