@@ -470,8 +470,8 @@ def _get_time_data(e: dict[str, Any], tz: timezone | None = None) -> TimeData:
         delta = start_dt - now_utc
         total_sec = delta.total_seconds()
 
-        if total_sec < 0:
-            # Event is in the past
+        if total_sec <= 0:
+            # Event is in the past or happening now
             hours_ago = abs(total_sec) / 3600
             if hours_ago < 1:
                 time_status = "LIVE"
