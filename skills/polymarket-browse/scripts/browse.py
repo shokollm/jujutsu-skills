@@ -6,6 +6,7 @@ Browse tradeable Polymarket events by game category.
 
 import html
 import json
+import sys
 import time
 import argparse
 import hashlib
@@ -1322,10 +1323,15 @@ def main() -> None:
 
     # Print detail for selected event if any
     if result["match_events"] and args.detail > 0:
-        print("\n")
         idx = args.detail - 1
-        if idx < 0 or idx >= len(result["match_events"]):
-            idx = 0
+        num_events = len(result["match_events"])
+        if idx < 0 or idx >= num_events:
+            print(
+                f"Error: --detail {args.detail} is out of range (available: 1-{num_events}).",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        print("\n")
         detail_event = result["match_events"][idx]
         detail = format_detail_event(detail_event)
         print_detail(detail_event, detail)
