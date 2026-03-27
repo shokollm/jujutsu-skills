@@ -11,6 +11,7 @@ import time
 import argparse
 import hashlib
 import os
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone, timedelta
 from typing import Any, Callable, TypedDict
@@ -101,6 +102,8 @@ INITIAL_RETRY_DELAY = 2  # exponential backoff starts at 2s
 MAX_RESPONSE_SIZE_MULTIPLIER = 10  # Response size limit = PAGE_SIZE * multiplier
 MAX_RESPONSE_SIZE_MIN = 10 * 1024 * 1024  # 10MB minimum
 MAX_RESPONSE_SIZE_MAX = 100 * 1024 * 1024  # 100MB maximum for safety
+RATE_LIMIT_CALLS = 10  # max API calls
+RATE_LIMIT_WINDOW = 1.0  # per second
 WIB = timezone(timedelta(hours=7))  # UTC+7 for Indonesian users
 _DISPLAY_TZ = WIB  # Module-level timezone for display (configurable via --timezone)
 
@@ -142,7 +145,6 @@ def parse_timezone(tz_str: str) -> timezone:
         return WIB
 
 
-
 def get_max_response_size(page_size: int = PAGE_SIZE) -> int:
     """
     Calculate max response size based on expected payload.
@@ -153,6 +155,37 @@ def get_max_response_size(page_size: int = PAGE_SIZE) -> int:
     size = max(multiplier, MAX_RESPONSE_SIZE_MIN)
     return min(size, MAX_RESPONSE_SIZE_MAX)
 
+
+class RateLimiter:
+    """Token bucket rate limiter for API calls. Thread-safe for use with ThreadPoolExecutor."""
+
+    def __init__(
+        self, calls: int = RATE_LIMIT_CALLS, window: float = RATE_LIMIT_WINDOW
+    ):
+        self.calls = calls
+        self.window = window
+        self.tokens = float(calls)
+        self.last_update = time.monotonic()
+        self._lock = threading.Lock()
+
+    def acquire(self) -> None:
+        """Block until a token is available."""
+        with self._lock:
+            now = time.monotonic()
+            elapsed = now - self.last_update
+            self.tokens = min(
+                self.calls, self.tokens + elapsed * (self.calls / self.window)
+            )
+            if self.tokens < 1:
+                wait_time = (1 - self.tokens) * (self.window / self.calls)
+                time.sleep(wait_time)
+                self.tokens = 0
+            else:
+                self.tokens -= 1
+            self.last_update = time.monotonic()
+
+
+_rate_limiter = RateLimiter()
 
 GAME_CATEGORIES = {
     "All Esports": "Esports",
@@ -231,6 +264,7 @@ def fetch_page(
         if attempt > 0:
             time.sleep(delay)
         try:
+            _rate_limiter.acquire()
             req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
             with urlopen(req, timeout=10) as r:
                 data = r.read()
