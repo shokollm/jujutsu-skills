@@ -1839,5 +1839,155 @@ class TestBrowseEvents(unittest.TestCase):
         self.assertIn("partial", result)
 
 
+class TestStartsBeforeFilter(unittest.TestCase):
+    """Tests for --starts-before filter in browse_events()."""
+
+    def _make_event(self, event_id, start_time, volume="50000"):
+        """Helper to create a minimal match event with startTime and valid tradeable data."""
+        return {
+            "id": event_id,
+            "title": f"Match {event_id}",
+            "seriesSlug": "x",
+            "gameId": "1",
+            "startTime": start_time,
+            "markets": [
+                {
+                    "sportsMarketType": "moneyline",
+                    "volume": volume,
+                    "bestBid": "0.50",
+                    "bestAsk": "0.52",
+                    "acceptingOrders": True,
+                    "closed": False,
+                }
+            ],
+        }
+
+    @patch("browse.fetch_all_pages")
+    def test_starts_before_filters_future_events(self, mock_fetch):
+        """Events with startTime > timestamp should be filtered out."""
+        from browse import browse_events
+
+        mock_fetch.return_value = {
+            "events": [
+                self._make_event(
+                    "m1", "2026-03-27T14:00:00Z"
+                ),  # After cutoff (14:00 > 12:00)
+                self._make_event("m2", "2026-03-28T12:00:00Z"),  # After cutoff
+            ],
+            "total_raw": 2,
+            "partial": False,
+        }
+
+        # 2026-03-27T12:00:00Z = 1774612800
+        result = browse_events("test", starts_before=1774612800)
+
+        self.assertEqual(len(result["match_events"]), 0)
+
+    @patch("browse.fetch_all_pages")
+    def test_starts_before_includes_past_events(self, mock_fetch):
+        """Events with startTime <= timestamp should be included."""
+        from browse import browse_events
+
+        mock_fetch.return_value = {
+            "events": [
+                self._make_event(
+                    "m1", "2026-03-27T10:00:00Z"
+                ),  # Before cutoff (10:00 < 12:00)
+                self._make_event(
+                    "m2", "2026-03-27T11:00:00Z"
+                ),  # Before cutoff (11:00 < 12:00)
+            ],
+            "total_raw": 2,
+            "partial": False,
+        }
+
+        # 2026-03-27T12:00:00Z = 1774612800
+        result = browse_events("test", starts_before=1774612800)
+
+        self.assertEqual(len(result["match_events"]), 2)
+
+    @patch("browse.fetch_all_pages")
+    def test_starts_before_without_timestamp(self, mock_fetch):
+        """Without starts_before, all events should be returned."""
+        from browse import browse_events
+
+        mock_fetch.return_value = {
+            "events": [
+                self._make_event("m1", "2026-03-27T14:00:00Z"),
+                self._make_event("m2", "2026-03-28T12:00:00Z"),
+            ],
+            "total_raw": 2,
+            "partial": False,
+        }
+
+        result = browse_events("test")
+
+        # No filter, all events returned
+        self.assertEqual(len(result["match_events"]), 2)
+
+
+class TestTimezoneParsing(unittest.TestCase):
+    """Tests for parse_timezone() and timezone display."""
+
+    def test_parse_timezone_utc_plus7(self):
+        """UTC+7 should parse to WIB."""
+        from browse import parse_timezone
+        from datetime import timezone, timedelta
+
+        tz = parse_timezone("UTC+7")
+        self.assertEqual(tz, timezone(timedelta(hours=7)))
+
+    def test_parse_timezone_utc_minus5(self):
+        """UTC-5 should parse correctly."""
+        from browse import parse_timezone
+        from datetime import timezone, timedelta
+
+        tz = parse_timezone("UTC-5")
+        self.assertEqual(tz, timezone(timedelta(hours=-5)))
+
+    def test_parse_timezone_utc_no_offset(self):
+        """UTC should return timezone.utc."""
+        from browse import parse_timezone
+
+        tz = parse_timezone("UTC")
+        self.assertEqual(tz, timezone.utc)
+
+    def test_parse_timezone_with_minutes(self):
+        """UTC+5:30 should parse correctly."""
+        from browse import parse_timezone
+        from datetime import timezone, timedelta
+
+        tz = parse_timezone("UTC+5:30")
+        self.assertEqual(tz, timezone(timedelta(hours=5, minutes=30)))
+
+    def test_parse_timezone_invalid_falls_back_to_wib(self):
+        """Invalid timezone should fall back to WIB."""
+        from browse import parse_timezone
+        from datetime import timezone, timedelta
+
+        tz = parse_timezone("Invalid/Timezone")
+        self.assertEqual(tz, timezone(timedelta(hours=7)))
+
+
+class TestUrlEncoding(unittest.TestCase):
+    """Tests for proper URL encoding of search queries."""
+
+    def test_quote_encodes_special_chars(self):
+        """quote() should properly encode all special characters."""
+        from urllib.parse import quote
+
+        test_cases = [
+            ("Team A", "Team%20A"),
+            ("Team A & Team B", "Team%20A%20%26%20Team%20B"),
+            ("a=b", "a%3Db"),
+            ("100%", "100%25"),
+            ("C++", "C%2B%2B"),
+            ("Team (A)", "Team%20%28A%29"),
+            ("Team#1", "Team%231"),
+        ]
+        for input_str, expected in test_cases:
+            self.assertEqual(quote(input_str, safe=""), expected)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -6,14 +6,16 @@ Browse tradeable Polymarket events by game category.
 
 import html
 import json
+import sys
 import time
 import argparse
 import hashlib
 import os
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone, timedelta
 from typing import Any, Callable, TypedDict
-from urllib.parse import urlencode
+from urllib.parse import urlencode, quote
 from urllib.request import urlopen, Request
 
 
@@ -97,7 +99,93 @@ class FetchResult(TypedDict):
 PAGE_SIZE = 50
 MAX_RETRIES = 5
 INITIAL_RETRY_DELAY = 2  # exponential backoff starts at 2s
+MAX_RESPONSE_SIZE_MULTIPLIER = 10  # Response size limit = PAGE_SIZE * multiplier
+MAX_RESPONSE_SIZE_MIN = 10 * 1024 * 1024  # 10MB minimum
+MAX_RESPONSE_SIZE_MAX = 100 * 1024 * 1024  # 100MB maximum for safety
+RATE_LIMIT_CALLS = 10  # max API calls
+RATE_LIMIT_WINDOW = 1.0  # per second
 WIB = timezone(timedelta(hours=7))  # UTC+7 for Indonesian users
+_DISPLAY_TZ = WIB  # Module-level timezone for display (configurable via --timezone)
+
+
+def parse_timezone(tz_str: str) -> timezone:
+    """
+    Parse timezone string to datetime.timezone.
+    Supports: UTC offset format (UTC+7, UTC-5).
+    Falls back to WIB (UTC+7) on parse failure.
+    """
+    tz_str = tz_str.strip()
+    if tz_str.startswith("UTC"):
+        offset_str = tz_str[3:].strip()
+        if not offset_str:
+            return timezone.utc
+        sign = -1 if offset_str[0] == "-" else 1
+        if offset_str[0] in "+-":
+            offset_str = offset_str[1:]
+        try:
+            if ":" in offset_str:
+                hours, minutes = offset_str.split(":")
+                hours = int(hours)
+                minutes = int(minutes)
+            else:
+                hours = int(offset_str)
+                minutes = 0
+            total_minutes = hours * 60 + minutes
+            if sign == -1:
+                total_minutes = -total_minutes
+            return timezone(timedelta(minutes=total_minutes))
+        except ValueError:
+            return WIB
+    return WIB
+    try:
+        from datetime import ZoneInfo
+
+        return ZoneInfo(tz_str).utcoffset(None)
+    except Exception:
+        return WIB
+
+
+def get_max_response_size(page_size: int = PAGE_SIZE) -> int:
+    """
+    Calculate max response size based on expected payload.
+    Uses 10x multiplier: if PAGE_SIZE=50 events, expected ~500KB-5MB,
+    so 10x gives 5MB-50MB. Clamped between 10MB and 100MB.
+    """
+    multiplier = MAX_RESPONSE_SIZE_MULTIPLIER * page_size * 1024  # rough estimate
+    size = max(multiplier, MAX_RESPONSE_SIZE_MIN)
+    return min(size, MAX_RESPONSE_SIZE_MAX)
+
+
+class RateLimiter:
+    """Token bucket rate limiter for API calls. Thread-safe for use with ThreadPoolExecutor."""
+
+    def __init__(
+        self, calls: int = RATE_LIMIT_CALLS, window: float = RATE_LIMIT_WINDOW
+    ):
+        self.calls = calls
+        self.window = window
+        self.tokens = float(calls)
+        self.last_update = time.monotonic()
+        self._lock = threading.Lock()
+
+    def acquire(self) -> None:
+        """Block until a token is available."""
+        with self._lock:
+            now = time.monotonic()
+            elapsed = now - self.last_update
+            self.tokens = min(
+                self.calls, self.tokens + elapsed * (self.calls / self.window)
+            )
+            if self.tokens < 1:
+                wait_time = (1 - self.tokens) * (self.window / self.calls)
+                time.sleep(wait_time)
+                self.tokens = 0
+            else:
+                self.tokens -= 1
+            self.last_update = time.monotonic()
+
+
+_rate_limiter = RateLimiter()
 
 GAME_CATEGORIES = {
     "All Esports": "Esports",
@@ -166,7 +254,7 @@ def fetch_page(
 ) -> dict[str, Any] | None:
     base = "https://gamma-api.polymarket.com/public-search"
     url = (
-        f"{base}?q={q.replace(' ', '%20')}&limit={PAGE_SIZE}&page={page}"
+        f"{base}?q={quote(q, safe='')}&limit={PAGE_SIZE}&page={page}"
         f"&search_profiles=false&search_tags=false"
         f"&keep_closed_markets=0&events_status=active&cache=false"
     )
@@ -176,9 +264,16 @@ def fetch_page(
         if attempt > 0:
             time.sleep(delay)
         try:
+            _rate_limiter.acquire()
             req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
             with urlopen(req, timeout=10) as r:
-                return json.loads(r.read())
+                data = r.read()
+                max_size = get_max_response_size(PAGE_SIZE)
+                if len(data) > max_size:
+                    raise ValueError(
+                        f"API response too large: {len(data)} bytes (max {max_size})"
+                    )
+                return json.loads(data)
         except Exception:
             if attempt < max_retries - 1:
                 delay *= 2
@@ -383,7 +478,7 @@ def is_tradeable_event(e: dict[str, Any]) -> bool:
             now = datetime.now(timezone.utc)
             if end_dt < now:
                 return False
-        except:
+        except (ValueError, TypeError):
             pass
 
     # Filter: match has already started (startTime is in the past)
@@ -397,7 +492,7 @@ def is_tradeable_event(e: dict[str, Any]) -> bool:
                 hours_ago = (now - start_dt).total_seconds() / 3600
                 if hours_ago > 4:
                     return False
-        except:
+        except (ValueError, TypeError):
             pass
 
     return True
@@ -453,12 +548,12 @@ def _get_time_data(e: dict[str, Any], tz: timezone | None = None) -> TimeData:
     Args:
         e: Event dict with 'startTime' or 'startDate' key.
         tz: datetime.timezone for abs_time formatting.
-            Defaults to WIB (UTC+7).
+            Defaults to _DISPLAY_TZ (set via --timezone, or WIB).
 
     Returns:
         TimeData with time_status, time_urgency, and abs_time
     """
-    tz = tz or WIB
+    tz = tz or _DISPLAY_TZ
     start_str = e.get("startTime") or e.get("startDate", "")
 
     if not start_str:
@@ -544,6 +639,47 @@ def sort_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
 # ============================================================
 
 
+def _is_live_event(e: dict[str, Any]) -> bool:
+    """Check if event is LIVE (started within last 4 hours)."""
+    start_str = e.get("startTime") or e.get("startDate", "")
+    if not start_str:
+        return False
+    try:
+        start_dt = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
+        now = datetime.now(timezone.utc)
+        delta = now - start_dt
+        if delta.total_seconds() < 0:
+            return False
+        hours_ago = delta.total_seconds() / 3600
+        return hours_ago < 4
+    except Exception:
+        return False
+
+
+def filter_by_starts_before(
+    events: list[dict[str, Any]], timestamp: int | None
+) -> list[dict[str, Any]]:
+    """Filter events to only include those starting before timestamp or LIVE events."""
+    if timestamp is None:
+        return events
+    filtered = []
+    for e in events:
+        start_str = e.get("startTime") or e.get("startDate", "")
+        if not start_str:
+            filtered.append(e)
+            continue
+        try:
+            start_dt = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
+            start_ts = start_dt.timestamp()
+            if start_ts <= timestamp:
+                filtered.append(e)
+            elif _is_live_event(e):
+                filtered.append(e)
+        except Exception:
+            filtered.append(e)
+    return filtered
+
+
 def browse_events(
     q: str,
     matches_max: int = 10,
@@ -552,6 +688,7 @@ def browse_events(
     sort_by: str | None = None,
     max_total: int | None = None,
     use_cache: bool = True,
+    starts_before: int | None = None,
 ) -> BrowseResult:
     """
     Browse Polymarket events.
@@ -564,6 +701,7 @@ def browse_events(
         sort_by: None (fast, API order) or "volume" (full fetch, sort by volume desc)
         max_total: max total events to fetch before early exit (None = no limit)
         use_cache: whether to use cache (default True)
+        starts_before: unix timestamp filter for match events (None = no filter)
     """
     use_early_exit = sort_by is None
     fetch_matches_max = matches_max if use_early_exit else None
@@ -579,7 +717,8 @@ def browse_events(
     events = result["events"]
     match_events, non_match_events = filter_events(events, tradeable_only)
 
-    # Sort if requested; otherwise preserve API order
+    match_events = filter_by_starts_before(match_events, starts_before)
+
     if sort_by == "volume":
         match_events = sort_events(match_events)
         non_match_events = sort_events(non_match_events)
@@ -819,11 +958,10 @@ def format_detail_event(e: dict[str, Any]) -> DetailEvent:
 
 
 def get_header_date() -> str:
-    """Return current date string like 'Mar 25, 2026'"""
+    """Return current date string like 'Mar 25, 2026' in display timezone."""
     now_utc = datetime.now(timezone.utc)
-    utc7 = timezone(timedelta(hours=7))
-    now_utc7 = now_utc.astimezone(utc7)
-    return now_utc7.strftime("%b %d, %Y")
+    now_display = now_utc.astimezone(_DISPLAY_TZ)
+    return now_display.strftime("%b %d, %Y")
 
 
 def get_tournament(title: str) -> str:
@@ -1175,6 +1313,18 @@ def main() -> None:
         help="Max total events to fetch before early exit. Default: no limit.",
     )
     parser.add_argument(
+        "--starts-before",
+        type=int,
+        default=None,
+        help="Unix timestamp filter. Only show match events starting before this time (LIVE events always shown).",
+    )
+    parser.add_argument(
+        "--timezone",
+        type=str,
+        default="UTC+7",
+        help="Timezone for displaying times (e.g., UTC+7, UTC-5). Default: UTC+7",
+    )
+    parser.add_argument(
         "--telegram",
         action="store_true",
         help="Send results to Telegram (TELEGRAM_BOT_TOKEN and CHAT_ID must be set in environment).",
@@ -1193,6 +1343,9 @@ def main() -> None:
     matches_max = args.matches if args.matches is not None else args.limit
     non_matches_max = args.non_matches if args.non_matches is not None else args.limit
 
+    global _DISPLAY_TZ
+    _DISPLAY_TZ = parse_timezone(args.timezone)
+
     if args.search:
         print(f"\nFetching {args.category} events matching '{args.search}'...")
     else:
@@ -1205,6 +1358,7 @@ def main() -> None:
         tradeable_only=tradeable_only,
         max_total=args.max_total,
         use_cache=not args.no_cache,
+        starts_before=args.starts_before,
     )
 
     print_browse(
@@ -1224,10 +1378,15 @@ def main() -> None:
 
     # Print detail for selected event if any
     if result["match_events"] and args.detail > 0:
-        print("\n")
         idx = args.detail - 1
-        if idx < 0 or idx >= len(result["match_events"]):
-            idx = 0
+        num_events = len(result["match_events"])
+        if idx < 0 or idx >= num_events:
+            print(
+                f"Error: --detail {args.detail} is out of range (available: 1-{num_events}).",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        print("\n")
         detail_event = result["match_events"][idx]
         detail = format_detail_event(detail_event)
         print_detail(detail_event, detail)
