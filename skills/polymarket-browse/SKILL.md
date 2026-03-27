@@ -1,6 +1,6 @@
 ---
 name: polymarket-browse
-version: 0.0.2
+version: 0.0.3
 category: research
 description: Browse tradeable Polymarket events by game category. Shows active matches with ML odds (cents format), volume, tournament, and market URLs. Supports Counter Strike, League of Legends, Dota 2, Valorant, NBA, NFL, UFC, Tennis.
 ---
@@ -142,8 +142,11 @@ The script first fetches page 1 to determine total pages, then fetches remaining
 
 ## Rate Limiting
 
-- Exponential backoff: 2s → 4s → 8s → 16s → 32s
+- TokenBucket rate limiter: 10 API calls per second
+- Exponential backoff on retries: 2s → 4s → 8s → 16s → 32s
 - Max 5 retries before aborting
+
+**URL Encoding**: Special characters in `--search` (e.g., `&`, `=`, `%`, `+`, `#`) are properly encoded to prevent URL injection.
 
 ## Caching
 
@@ -250,11 +253,21 @@ polymarket-browse --timezone UTC-5
 
 ## Changelog
 
-### v0.0.2 (Current)
+### v0.0.3 (Current)
+- Added `--starts-before` filter for filtering match events by start time
+- Added `--timezone` argument for display timezone configuration (default: UTC+7)
+- Added TokenBucket rate limiter (10 calls/sec) to prevent API overload
+- Added dynamic response size limits to prevent memory exhaustion
+- Added proper URL encoding for special characters in --search
+- Replaced bare `except:` with specific exception handling
+- Improved `--detail` argument validation with error on out-of-range
+- Added Troubleshooting, Examples sections to documentation
+- Created SECURITY.md for audit tracking
+
+### v0.0.2
 - Added `--matches-only` and `--non-matches-only` filters
 - Added `--max-total` for limiting fetch size
 - Added Telegram support with `--telegram` flag
-- Added `--timezone` argument for display timezone configuration
 - Improved BO2 tie detection
 
 ### v0.0.1
