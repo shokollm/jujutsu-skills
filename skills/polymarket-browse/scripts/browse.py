@@ -98,6 +98,9 @@ class FetchResult(TypedDict):
 PAGE_SIZE = 50
 MAX_RETRIES = 5
 INITIAL_RETRY_DELAY = 2  # exponential backoff starts at 2s
+MAX_RESPONSE_SIZE_MULTIPLIER = 10  # Response size limit = PAGE_SIZE * multiplier
+MAX_RESPONSE_SIZE_MIN = 10 * 1024 * 1024  # 10MB minimum
+MAX_RESPONSE_SIZE_MAX = 100 * 1024 * 1024  # 100MB maximum for safety
 WIB = timezone(timedelta(hours=7))  # UTC+7 for Indonesian users
 _DISPLAY_TZ = WIB  # Module-level timezone for display (configurable via --timezone)
 
@@ -137,6 +140,18 @@ def parse_timezone(tz_str: str) -> timezone:
         return ZoneInfo(tz_str).utcoffset(None)
     except Exception:
         return WIB
+
+
+
+def get_max_response_size(page_size: int = PAGE_SIZE) -> int:
+    """
+    Calculate max response size based on expected payload.
+    Uses 10x multiplier: if PAGE_SIZE=50 events, expected ~500KB-5MB,
+    so 10x gives 5MB-50MB. Clamped between 10MB and 100MB.
+    """
+    multiplier = MAX_RESPONSE_SIZE_MULTIPLIER * page_size * 1024  # rough estimate
+    size = max(multiplier, MAX_RESPONSE_SIZE_MIN)
+    return min(size, MAX_RESPONSE_SIZE_MAX)
 
 
 GAME_CATEGORIES = {
@@ -218,7 +233,13 @@ def fetch_page(
         try:
             req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
             with urlopen(req, timeout=10) as r:
-                return json.loads(r.read())
+                data = r.read()
+                max_size = get_max_response_size(PAGE_SIZE)
+                if len(data) > max_size:
+                    raise ValueError(
+                        f"API response too large: {len(data)} bytes (max {max_size})"
+                    )
+                return json.loads(data)
         except Exception:
             if attempt < max_retries - 1:
                 delay *= 2
