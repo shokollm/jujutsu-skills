@@ -1969,5 +1969,25 @@ class TestTimezoneParsing(unittest.TestCase):
         self.assertEqual(tz, timezone(timedelta(hours=7)))
 
 
+class TestUrlEncoding(unittest.TestCase):
+    """Tests for proper URL encoding of search queries."""
+
+    def test_quote_encodes_special_chars(self):
+        """quote() should properly encode all special characters."""
+        from urllib.parse import quote
+
+        test_cases = [
+            ("Team A", "Team%20A"),
+            ("Team A & Team B", "Team%20A%20%26%20Team%20B"),
+            ("a=b", "a%3Db"),
+            ("100%", "100%25"),
+            ("C++", "C%2B%2B"),
+            ("Team (A)", "Team%20%28A%29"),
+            ("Team#1", "Team%231"),
+        ]
+        for input_str, expected in test_cases:
+            self.assertEqual(quote(input_str, safe=""), expected)
+
+
 if __name__ == "__main__":
     unittest.main()

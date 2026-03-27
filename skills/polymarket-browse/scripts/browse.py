@@ -14,7 +14,7 @@ import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone, timedelta
 from typing import Any, Callable, TypedDict
-from urllib.parse import urlencode
+from urllib.parse import urlencode, quote
 from urllib.request import urlopen, Request
 
 
@@ -206,7 +206,7 @@ def fetch_page(
 ) -> dict[str, Any] | None:
     base = "https://gamma-api.polymarket.com/public-search"
     url = (
-        f"{base}?q={q.replace(' ', '%20')}&limit={PAGE_SIZE}&page={page}"
+        f"{base}?q={quote(q, safe='')}&limit={PAGE_SIZE}&page={page}"
         f"&search_profiles=false&search_tags=false"
         f"&keep_closed_markets=0&events_status=active&cache=false"
     )
