@@ -544,6 +544,47 @@ def sort_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
 # ============================================================
 
 
+def _is_live_event(e: dict[str, Any]) -> bool:
+    """Check if event is LIVE (started within last 4 hours)."""
+    start_str = e.get("startTime") or e.get("startDate", "")
+    if not start_str:
+        return False
+    try:
+        start_dt = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
+        now = datetime.now(timezone.utc)
+        delta = now - start_dt
+        if delta.total_seconds() < 0:
+            return False
+        hours_ago = delta.total_seconds() / 3600
+        return hours_ago < 4
+    except Exception:
+        return False
+
+
+def filter_by_starts_before(
+    events: list[dict[str, Any]], timestamp: int | None
+) -> list[dict[str, Any]]:
+    """Filter events to only include those starting before timestamp or LIVE events."""
+    if timestamp is None:
+        return events
+    filtered = []
+    for e in events:
+        start_str = e.get("startTime") or e.get("startDate", "")
+        if not start_str:
+            filtered.append(e)
+            continue
+        try:
+            start_dt = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
+            start_ts = start_dt.timestamp()
+            if start_ts <= timestamp:
+                filtered.append(e)
+            elif _is_live_event(e):
+                filtered.append(e)
+        except Exception:
+            filtered.append(e)
+    return filtered
+
+
 def browse_events(
     q: str,
     matches_max: int = 10,
@@ -552,6 +593,7 @@ def browse_events(
     sort_by: str | None = None,
     max_total: int | None = None,
     use_cache: bool = True,
+    starts_before: int | None = None,
 ) -> BrowseResult:
     """
     Browse Polymarket events.
@@ -564,6 +606,7 @@ def browse_events(
         sort_by: None (fast, API order) or "volume" (full fetch, sort by volume desc)
         max_total: max total events to fetch before early exit (None = no limit)
         use_cache: whether to use cache (default True)
+        starts_before: unix timestamp filter for match events (None = no filter)
     """
     use_early_exit = sort_by is None
     fetch_matches_max = matches_max if use_early_exit else None
@@ -579,7 +622,8 @@ def browse_events(
     events = result["events"]
     match_events, non_match_events = filter_events(events, tradeable_only)
 
-    # Sort if requested; otherwise preserve API order
+    match_events = filter_by_starts_before(match_events, starts_before)
+
     if sort_by == "volume":
         match_events = sort_events(match_events)
         non_match_events = sort_events(non_match_events)
@@ -1175,6 +1219,12 @@ def main() -> None:
         help="Max total events to fetch before early exit. Default: no limit.",
     )
     parser.add_argument(
+        "--starts-before",
+        type=int,
+        default=None,
+        help="Unix timestamp filter. Only show match events starting before this time (LIVE events always shown).",
+    )
+    parser.add_argument(
         "--telegram",
         action="store_true",
         help="Send results to Telegram (TELEGRAM_BOT_TOKEN and CHAT_ID must be set in environment).",
@@ -1205,6 +1255,7 @@ def main() -> None:
         tradeable_only=tradeable_only,
         max_total=args.max_total,
         use_cache=not args.no_cache,
+        starts_before=args.starts_before,
     )
 
     print_browse(
