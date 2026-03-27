@@ -250,35 +250,3 @@ polymarket-browse --max-total 20
 polymarket-browse --timezone UTC+8
 polymarket-browse --timezone UTC-5
 ```
-
-## Changelog
-
-### v0.0.3 (Current)
-- Added `--starts-before` filter for filtering match events by start time
-- Added `--timezone` argument for display timezone configuration (default: UTC+7)
-- Added TokenBucket rate limiter (10 calls/sec) to prevent API overload
-- Added dynamic response size limits to prevent memory exhaustion
-- Added proper URL encoding for special characters in --search
-- Replaced bare `except:` with specific exception handling
-- Improved `--detail` argument validation with error on out-of-range
-- Added Troubleshooting, Examples sections to documentation
-- Created SECURITY.md for audit tracking
-
-### v0.0.2
-- Added `--matches-only` and `--non-matches-only` filters
-- Added `--max-total` for limiting fetch size
-- Added Telegram support with `--telegram` flag
-- Improved BO2 tie detection
-
-### v0.0.1
-- Initial release
-- Basic Polymarket browsing by category
-- Match/non-match market filtering
-- Moneyline odds display
-
-## Credits
-
-**Author:** shokollm  
-**Repository:** https://github.com/shokollm/jujutsu-skills
-
-Built for Hermes Agent and OpenClaw.
